@@ -1,6 +1,8 @@
 .git/**
+.github/**
 node_modules/**
 src/**
+test/**
 *.map
 esbuild.mjs
 tsconfig.json
