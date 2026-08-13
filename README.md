@@ -53,3 +53,9 @@ Accept / reject the focused diff: `Cmd+Enter` / `Cmd+Backspace` (bound to
 
 Diff bridge only — no chat/webview. Protocol reverse-engineered from the
 official extension; see the in-repo notes for the message spec.
+
+<!-- diff-bridge verification -->
+
+
+<!-- diff-bridge verification -->
+

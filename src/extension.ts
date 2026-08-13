@@ -25,7 +25,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("claude-vscode.acceptProposedDiff", accept),
     vscode.commands.registerCommand("claude-vscode.rejectProposedDiff", reject),
     vscode.commands.registerCommand("claudeIdeBridge.showStatus", () => {
-      vscode.window.showInformationMessage(adapter?.status() ?? "not started");
+      adapter?.showConnections();
     })
   );
 

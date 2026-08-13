@@ -2,7 +2,7 @@
   "name": "claude-ide-bridge",
   "displayName": "Claude IDE Bridge",
   "description": "Multi-client IDE diff bridge: lets several Claude Code sessions share one code-server window (in-editor diffs, accept/reject). Replaces the single-client official integration.",
-  "version": "0.0.5",
+  "version": "0.0.11",
   "publisher": "cai",
   "license": "MIT",
   "engines": {
@@ -41,7 +41,17 @@
         "key": "cmd+backspace",
         "when": "claudeIdeBridge.diffActive"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Claude IDE Bridge",
+      "properties": {
+        "claudeIdeBridge.port": {
+          "type": "number",
+          "default": 8991,
+          "description": "Fixed localhost port for the IDE bridge, kept stable across reloads so sessions can reconnect without re-selecting via /ide. Set 0 for a random port."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",

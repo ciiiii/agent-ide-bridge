@@ -15,23 +15,30 @@ import {
   TOOL,
 } from "./protocol";
 
+/** Per-connection identity, captured from MCP `initialize` + `roots/list`. */
+interface ClientMeta {
+  name: string;
+  version: string;
+  since: Date;
+  folder?: string; // the session's project root (from roots/list)
+}
+
 /**
  * Claude Code IDE protocol adapter: a MULTI-CLIENT MCP-over-WebSocket server.
  *
  * Unlike the official extension (single client, evicts the previous connection)
  * this keeps every authenticated client and multiplexes them onto one shared
  * EditorBridge — so several `claude` sessions share one code-server window.
- *
- * NOTE: `initialize` response and tool argument names are cross-checked against
- * the protocol spec + a captured real handshake. All incoming frames are logged
- * at trace level so the exact wire shapes can be confirmed empirically.
  */
 export class ClaudeAdapter implements vscode.Disposable {
   private wss?: WebSocketServer;
   private port?: number;
   private authToken = "";
-  private readonly clients = new Set<WebSocket>();
+  private readonly clients = new Map<WebSocket, ClientMeta>();
   private readonly subs: vscode.Disposable[] = [];
+  private statusBar?: vscode.StatusBarItem;
+  private reqSeq = 0;
+  private readonly pendingReqs = new Map<string | number, (result: unknown) => void>();
 
   constructor(
     private readonly bridge: EditorBridge,
@@ -41,13 +48,8 @@ export class ClaudeAdapter implements vscode.Disposable {
 
   async start(): Promise<void> {
     cleanupStaleLocks(); // drop locks left by dead servers so discovery is clean
-    const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-    this.wss = wss;
-    await new Promise<void>((resolve, reject) => {
-      wss.once("listening", resolve);
-      wss.once("error", reject);
-    });
-    this.port = (wss.address() as { port: number }).port;
+    this.wss = await this.createServer();
+    this.port = (this.wss.address() as { port: number }).port;
 
     const { authToken } = writeLock(
       this.port,
@@ -60,13 +62,12 @@ export class ClaudeAdapter implements vscode.Disposable {
     // extension does. External terminals use the shell wrapper instead.
     this.ctx.environmentVariableCollection.replace(SSE_PORT_ENV, String(this.port));
 
-    wss.on("connection", (ws, req) => this.onConnection(ws, req));
+    this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
 
-    // Broadcast editor context to every connected session.
+    // Editor context: selection goes only to sessions whose project folder
+    // contains the file; diagnostics are broadcast (the CLI filters by path).
     this.subs.push(
-      this.bridge.onSelectionChanged((sel) =>
-        this.broadcast(NOTIFY.selectionChanged, selectionParams(sel))
-      ),
+      this.bridge.onSelectionChanged((sel) => this.sendSelection(sel)),
       this.bridge.onDiagnosticsChanged((files) =>
         this.broadcast(NOTIFY.diagnosticsChanged, {
           uris: files.map((f) => vscode.Uri.file(f).toString()),
@@ -74,7 +75,65 @@ export class ClaudeAdapter implements vscode.Disposable {
       )
     );
 
+    // Status bar item: live session count; click for the connection list.
+    this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    this.statusBar.command = "claudeIdeBridge.showStatus";
+    this.updateStatus();
+    this.statusBar.show();
+
     this.log.info(`listening on 127.0.0.1:${this.port} (lock written)`);
+  }
+
+  /**
+   * Bind the configured fixed port when free (so the CLAUDE_CODE_SSE_PORT the CLI
+   * holds stays valid across window reloads — no /ide dance), else a random one.
+   */
+  private async createServer(): Promise<WebSocketServer> {
+    const configured = vscode.workspace
+      .getConfiguration("claudeIdeBridge")
+      .get<number>("port", 8991);
+    for (const port of [configured, 0]) {
+      try {
+        const wss = new WebSocketServer({ host: "127.0.0.1", port });
+        await new Promise<void>((resolve, reject) => {
+          wss.once("listening", resolve);
+          wss.once("error", reject);
+        });
+        return wss;
+      } catch (e) {
+        this.log.warn(`port ${port} bind failed (${String(e)})`);
+      }
+    }
+    throw new Error("failed to bind a port");
+  }
+
+  private updateStatus(): void {
+    if (!this.statusBar) return;
+    const n = this.clients.size;
+    // Keep the hover cheap and static (a rebuilt MarkdownString flickered); the
+    // full list is shown on click.
+    this.statusBar.text = `$(plug) Claude Bridge: ${n}`;
+    this.statusBar.tooltip = `Claude IDE Bridge · ${n} session(s) · click for details`;
+    this.statusBar.backgroundColor =
+      n === 0 ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+  }
+
+  /** Show the live connection list as a popup list — bound to the status bar click. */
+  showConnections(): void {
+    const qp = vscode.window.createQuickPick();
+    qp.title = `Claude IDE Bridge — 127.0.0.1:${this.port ?? "?"}`;
+    qp.placeholder = `${this.clients.size} session(s) connected`;
+    qp.items =
+      this.clients.size === 0
+        ? [{ label: "$(circle-slash) No sessions connected" }]
+        : [...this.clients.values()].map((m) => ({
+            label: `$(folder) ${m.folder ? basename(m.folder) : m.name || "(handshaking)"}`,
+            description: m.version ? `${m.name} v${m.version}` : m.name,
+            detail: `${m.folder ?? "(folder unknown)"} · since ${m.since.toLocaleTimeString()}`,
+          }));
+    qp.onDidAccept(() => qp.hide());
+    qp.onDidHide(() => qp.dispose());
+    qp.show();
   }
 
   status(): string {
@@ -92,13 +151,16 @@ export class ClaudeAdapter implements vscode.Disposable {
       ws.close(1008, "Unauthorized");
       return;
     }
-    this.clients.add(ws); // multi-client: never evict a previous connection
+    // multi-client: never evict a previous connection
+    this.clients.set(ws, { name: "(handshaking)", version: "", since: new Date() });
     this.log.info(`client connected (${this.clients.size} total)`);
+    this.updateStatus();
 
     ws.on("message", (data) => void this.onMessage(ws, data));
     ws.on("close", () => {
       this.clients.delete(ws);
       this.log.info(`client disconnected (${this.clients.size} left)`);
+      this.updateStatus();
     });
     ws.on("error", (e) => this.log.warn(`ws error: ${String(e)}`));
   }
@@ -112,8 +174,19 @@ export class ClaudeAdapter implements vscode.Disposable {
     }
     this.log.trace(`recv ${data.toString()}`);
 
+    // Response to a request WE sent (has id + result/error, no method).
+    if (msg.id != null && msg.method === undefined) {
+      const resolve = this.pendingReqs.get(msg.id);
+      if (resolve) {
+        this.pendingReqs.delete(msg.id);
+        resolve(msg.result);
+      }
+      return;
+    }
+
     // Requests carry an id; notifications (initialized, cancelled) do not.
     if (msg.method && msg.id !== undefined && msg.id !== null) {
+      if (msg.method === "initialize") this.rememberClient(ws, msg.params);
       try {
         const result = await this.handleRequest(msg.method, msg.params ?? {});
         this.send(ws, { jsonrpc: "2.0", id: msg.id, result });
@@ -124,6 +197,74 @@ export class ClaudeAdapter implements vscode.Disposable {
           error: { code: -32603, message: errMsg(err) },
         });
       }
+    } else if (msg.method === "notifications/initialized") {
+      // The CLI is ready: learn its project root first, then push the current
+      // selection (filtered to that folder) so the active file shows under it.
+      void this.requestRoots(ws);
+    }
+  }
+
+  /** Record the client's identity from initialize's clientInfo for the status list. */
+  private rememberClient(ws: WebSocket, params?: JsonObject): void {
+    const meta = this.clients.get(ws);
+    if (!meta) return;
+    const info = (params?.clientInfo ?? {}) as { name?: string; version?: string };
+    meta.name = str(info.name) || meta.name;
+    meta.version = str(info.version);
+    this.updateStatus();
+  }
+
+  /** Ask the client for its workspace roots (its project folder) via MCP roots/list. */
+  private async requestRoots(ws: WebSocket): Promise<void> {
+    const id = `roots-${++this.reqSeq}`;
+    const result = await new Promise<unknown>((resolve) => {
+      this.pendingReqs.set(id, resolve);
+      this.send(ws, { jsonrpc: "2.0", id, method: "roots/list", params: {} });
+      setTimeout(() => {
+        if (this.pendingReqs.delete(id)) resolve(undefined);
+      }, 3000);
+    });
+    const roots = (result as { roots?: Array<{ uri?: string }> } | undefined)?.roots ?? [];
+    const meta = this.clients.get(ws);
+    if (meta && roots[0]?.uri) {
+      meta.folder = uriToPath(roots[0].uri);
+      this.updateStatus();
+    }
+    this.pushSelection(ws); // now that the folder is known, show the active file if in-folder
+  }
+
+  /** A selection reaches a session only if the file is within its project folder. */
+  private selectionAllowed(filePath: string | null, meta: ClientMeta): boolean {
+    if (!meta.folder || !filePath) return true; // unknown folder / non-file editor: don't hide
+    return filePath === meta.folder || filePath.startsWith(meta.folder + "/");
+  }
+
+  /** Push the current selection to one client, if it's inside that session's folder. */
+  private pushSelection(ws: WebSocket): void {
+    const sel = this.bridge.getCurrentSelection();
+    const meta = this.clients.get(ws);
+    if (sel && meta && this.selectionAllowed(sel.filePath, meta)) {
+      this.notify(ws, NOTIFY.selectionChanged, selectionParams(sel));
+    }
+  }
+
+  /** Send a selection to every session whose project folder contains the file. */
+  private sendSelection(sel: SelectionInfo): void {
+    const frame = JSON.stringify({
+      jsonrpc: "2.0",
+      method: NOTIFY.selectionChanged,
+      params: selectionParams(sel),
+    });
+    for (const [ws, meta] of this.clients) {
+      if (ws.readyState === WebSocket.OPEN && this.selectionAllowed(sel.filePath, meta)) {
+        ws.send(frame);
+      }
+    }
+  }
+
+  private notify(ws: WebSocket, method: string, params: unknown): void {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
     }
   }
 
@@ -256,7 +397,7 @@ export class ClaudeAdapter implements vscode.Disposable {
 
   private broadcast(method: string, params: unknown): void {
     const frame = JSON.stringify({ jsonrpc: "2.0", method, params });
-    for (const ws of this.clients) {
+    for (const ws of this.clients.keys()) {
       if (ws.readyState === WebSocket.OPEN) ws.send(frame);
     }
   }
@@ -269,7 +410,7 @@ export class ClaudeAdapter implements vscode.Disposable {
 
   dispose(): void {
     for (const d of this.subs) d.dispose();
-    for (const ws of this.clients) {
+    for (const ws of this.clients.keys()) {
       try {
         ws.close();
       } catch {
@@ -277,6 +418,7 @@ export class ClaudeAdapter implements vscode.Disposable {
       }
     }
     this.clients.clear();
+    this.statusBar?.dispose();
     this.wss?.close();
     if (this.port !== undefined) removeLock(this.port);
     this.ctx.environmentVariableCollection.delete(SSE_PORT_ENV);
@@ -325,6 +467,8 @@ interface JsonRpcMessage {
   id?: string | number | null;
   method?: string;
   params?: JsonObject;
+  result?: unknown;
+  error?: unknown;
 }
 type JsonObject = Record<string, unknown>;
 interface ToolResult {
@@ -346,7 +490,7 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
 }
 function basename(p: string): string {
-  return p.split("/").pop() || p;
+  return p.replace(/\/+$/, "").split("/").pop() || p;
 }
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
