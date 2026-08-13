@@ -15,10 +15,10 @@ jobs:
       release_created: ${{ steps.rp.outputs.release_created }}
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
+      # Uses release-please-config.json + .release-please-manifest.json (manifest mode)
+      # so extra-files (herdr-plugin.toml, protocol.ts SERVER_INFO) are version-bumped too.
       - uses: googleapis/release-please-action@v4
         id: rp
-        with:
-          release-type: node
 
   attach-vsix:
     needs: release-please
@@ -31,7 +31,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run package
-      - run: gh release upload "${{ needs.release-please.outputs.tag_name }}" agent-ide-bridge.vsix --clobber
+      - run: npm run package # builds dist/ (extension + cli) and the .vsix
+      # Ship both frontends: the code-server extension (.vsix) and the standalone
+      # terminal CLI bundle (dist/cli.js) as `claude-diff`.
+      - run: cp dist/cli.js claude-diff
+      - run: gh release upload "${{ needs.release-please.outputs.tag_name }}" agent-ide-bridge.vsix claude-diff --clobber
         env:
           GITHUB_TOKEN: ${{ github.token }}
