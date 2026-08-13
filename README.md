@@ -1,4 +1,4 @@
-# Claude IDE Bridge
+# Agent IDE Bridge
 
 A **multi-client** IDE diff bridge for code-server. It lets several Claude Code
 sessions share **one** code-server window — each with working in-editor diffs
@@ -35,13 +35,13 @@ src/
 ```bash
 npm install
 npm run build          # -> dist/extension.js (esbuild bundle)
-npm run package        # -> claude-ide-bridge.vsix
+npm run package        # -> agent-ide-bridge.vsix
 ```
 
 ## Install (code-server)
 
 ```bash
-code-server --install-extension claude-ide-bridge.vsix
+code-server --install-extension agent-ide-bridge.vsix
 code-server --uninstall-extension anthropic.claude-code   # avoid lockfile conflicts
 # reload the window (or restart the code-server service)
 ```
@@ -53,12 +53,3 @@ Accept / reject the focused diff: `Cmd+Enter` / `Cmd+Backspace` (bound to
 
 Diff bridge only — no chat/webview. Protocol reverse-engineered from the
 official extension; see the in-repo notes for the message spec.
-
-<!-- diff-bridge verification -->
-
-
-<!-- diff-bridge verification -->
-
-
-<!-- diff-bridge verification -->
-

@@ -20,7 +20,7 @@ export const SUPPORTED_PROTOCOL_VERSIONS = [
 ];
 
 export const SERVER_INFO = {
-  name: "Claude IDE Bridge MCP",
+  name: "Agent IDE Bridge MCP",
   version: "0.0.1",
 };
 

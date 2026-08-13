@@ -77,7 +77,7 @@ export class ClaudeAdapter implements vscode.Disposable {
 
     // Status bar item: live session count; click for the connection list.
     this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.statusBar.command = "claudeIdeBridge.showStatus";
+    this.statusBar.command = "agentIdeBridge.showStatus";
     this.updateStatus();
     this.statusBar.show();
 
@@ -90,7 +90,7 @@ export class ClaudeAdapter implements vscode.Disposable {
    */
   private async createServer(): Promise<WebSocketServer> {
     const configured = vscode.workspace
-      .getConfiguration("claudeIdeBridge")
+      .getConfiguration("agentIdeBridge")
       .get<number>("port", 8991);
     for (const port of [configured, 0]) {
       try {
@@ -112,8 +112,8 @@ export class ClaudeAdapter implements vscode.Disposable {
     const n = this.clients.size;
     // Keep the hover cheap and static (a rebuilt MarkdownString flickered); the
     // full list is shown on click.
-    this.statusBar.text = `$(plug) Claude Bridge: ${n}`;
-    this.statusBar.tooltip = `Claude IDE Bridge · ${n} session(s) · click for details`;
+    this.statusBar.text = `$(plug) Agent Bridge: ${n}`;
+    this.statusBar.tooltip = `Agent IDE Bridge · ${n} session(s) · click for details`;
     this.statusBar.backgroundColor =
       n === 0 ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
   }
@@ -121,7 +121,7 @@ export class ClaudeAdapter implements vscode.Disposable {
   /** Show the live connection list as a popup list — bound to the status bar click. */
   showConnections(): void {
     const qp = vscode.window.createQuickPick();
-    qp.title = `Claude IDE Bridge — 127.0.0.1:${this.port ?? "?"}`;
+    qp.title = `Agent IDE Bridge — 127.0.0.1:${this.port ?? "?"}`;
     qp.placeholder = `${this.clients.size} session(s) connected`;
     qp.items =
       this.clients.size === 0
@@ -138,8 +138,8 @@ export class ClaudeAdapter implements vscode.Disposable {
 
   status(): string {
     return this.port
-      ? `Claude IDE Bridge: 127.0.0.1:${this.port}, ${this.clients.size} client(s)`
-      : "Claude IDE Bridge: not started";
+      ? `Agent IDE Bridge: 127.0.0.1:${this.port}, ${this.clients.size} client(s)`
+      : "Agent IDE Bridge: not started";
   }
 
   // ---- connections ----------------------------------------------------------

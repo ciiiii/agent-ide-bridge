@@ -6,7 +6,7 @@ let bridge: EditorBridge | undefined;
 let adapter: ClaudeAdapter | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const log = vscode.window.createOutputChannel("Claude IDE Bridge", { log: true });
+  const log = vscode.window.createOutputChannel("Agent IDE Bridge", { log: true });
   context.subscriptions.push(log);
 
   bridge = new EditorBridge();
@@ -24,17 +24,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("claude-code.rejectProposedDiff", reject),
     vscode.commands.registerCommand("claude-vscode.acceptProposedDiff", accept),
     vscode.commands.registerCommand("claude-vscode.rejectProposedDiff", reject),
-    vscode.commands.registerCommand("claudeIdeBridge.showStatus", () => {
+    vscode.commands.registerCommand("agentIdeBridge.showStatus", () => {
       adapter?.showConnections();
     })
   );
 
   try {
     await adapter.start();
-    log.info("Claude IDE Bridge active");
+    log.info("Agent IDE Bridge active");
   } catch (err) {
     log.error(`failed to start: ${String(err)}`);
-    vscode.window.showErrorMessage(`Claude IDE Bridge failed to start: ${String(err)}`);
+    vscode.window.showErrorMessage(`Agent IDE Bridge failed to start: ${String(err)}`);
   }
 }
 

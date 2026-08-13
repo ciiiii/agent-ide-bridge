@@ -9,7 +9,7 @@ import {
 } from "./types";
 
 /** Virtual scheme that backs the right-hand ("proposed") side of a diff. */
-const PROPOSED_SCHEME = "claude-bridge-proposed";
+const PROPOSED_SCHEME = "agent-bridge-proposed";
 
 interface PendingDiff {
   id: string;
@@ -99,7 +99,7 @@ export class EditorBridge implements vscode.Disposable {
   private updateDiffContext(): void {
     void vscode.commands.executeCommand(
       "setContext",
-      "claudeIdeBridge.diffActive",
+      "agentIdeBridge.diffActive",
       this.activePending() !== undefined
     );
   }
