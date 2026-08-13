@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import { basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { RawData, WebSocket, WebSocketServer } from "ws";
 import {
@@ -139,12 +140,6 @@ export class ClaudeAdapter implements Disposable {
     for (const cb of this.clientListeners) cb();
   }
 
-  status(): string {
-    return this._port
-      ? `Agent IDE Bridge: 127.0.0.1:${this._port}, ${this.clients.size} client(s)`
-      : "Agent IDE Bridge: not started";
-  }
-
   // ---- connections ----------------------------------------------------------
 
   private onConnection(ws: WebSocket, req: IncomingMessage): void {
@@ -204,6 +199,11 @@ export class ClaudeAdapter implements Disposable {
       // The CLI is ready: learn its project root first, then push the current
       // selection (filtered to that folder) so the active file shows under it.
       void this.requestRoots(ws);
+    } else if (msg.method === "notifications/cancelled") {
+      // The client cancelled an in-flight request — e.g. the user rejected/aborted
+      // the edit on the CLI side. Reject the active diff so the viewer resolves as
+      // rejected rather than hanging or being closed as accepted.
+      void this.frontend.rejectActiveDiff();
     }
   }
 
@@ -490,9 +490,6 @@ function json(value: unknown): ToolResult {
 }
 function str(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : String(v);
-}
-function basename(p: string): string {
-  return p.replace(/\/+$/, "").split("/").pop() || p;
 }
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);

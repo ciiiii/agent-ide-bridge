@@ -14,7 +14,7 @@ import {
   SelectionInfo,
 } from "../core/types";
 
-const ansi = {
+export const ansi = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
   dim: "\x1b[2m",
@@ -61,8 +61,7 @@ export class TerminalDiffFrontend implements EditorFrontend {
       oldExists = false;
     }
     const interactive = Boolean(process.stdout.isTTY && process.stdin.isTTY);
-    const cols = (interactive && process.stdout.columns) || 100;
-    const raw = await this.renderRaw(request, oldExists, cols);
+    const raw = await this.renderRaw(request, oldExists, termCols());
     return interactive
       ? this.runPager(request, raw, index)
       : this.plain(request, raw, oldExists);
@@ -112,11 +111,9 @@ export class TerminalDiffFrontend implements EditorFrontend {
         resolve(outcome);
       };
       const onData = (buf: Buffer) => {
-        const k = buf.toString();
-        if (k === "y" || k === "Y" || k === "\r" || k === "\n")
-          settle({ status: "saved", content: request.newContent });
-        else if (k === "n" || k === "N" || k === "\x1b" || k === "q" || k === "\x03")
-          settle({ status: "rejected" });
+        const v = keyVerdict(buf.toString());
+        if (v === "accept") settle({ status: "saved", content: request.newContent });
+        else if (v === "reject") settle({ status: "rejected" });
       };
       this.active = { acceptContent: request.newContent, settle };
       stdin.resume();
@@ -132,27 +129,18 @@ export class TerminalDiffFrontend implements EditorFrontend {
     await fs.writeFile(tmp, request.newContent, "utf8");
     const left = oldExists ? request.filePath : "/dev/null";
     try {
-      const plainDiff = await capture("git", ["--no-pager", "diff", "--no-index", "--", left, tmp]);
+      const plainDiff = await run("git", ["--no-pager", "diff", "--no-index", "--", left, tmp]);
       if (!plainDiff.trim()) return `${ansi.dim}(no changes)${ansi.reset}`;
       let out: string;
       try {
-        out = await pipeInput(plainDiff, "delta", [
-          "--width",
-          String(cols),
-          "--paging=never",
-          "--file-style=omit", // our title bar already names the file
-        ]);
+        // --no-gitconfig ignores the user's delta config so a side-by-side /
+        // line-numbers setup can't cram or break a narrow pane; delta renders clean
+        // unified output at exactly the pane width. --file-style=omit drops the file
+        // header (our title bar already names the file).
+        out = await run("delta", ["--no-gitconfig", "--width", String(cols), "--paging=never", "--file-style=omit"], plainDiff);
       } catch {
         // delta absent/failed → colored git diff
-        out = await capture("git", [
-          "--no-pager",
-          "diff",
-          "--no-index",
-          "--color=always",
-          "--",
-          left,
-          tmp,
-        ]);
+        out = await run("git", ["--no-pager", "diff", "--no-index", "--color=always", "--", left, tmp]);
       }
       // both tools print the temp path in headers; show the real file path.
       return out.split(tmp).join(request.filePath);
@@ -167,13 +155,7 @@ export class TerminalDiffFrontend implements EditorFrontend {
     }
   }
 
-  // ---- accept/reject entry points ------------------------------------------
-
-  async acceptActiveDiff(): Promise<boolean> {
-    if (!this.active) return false;
-    this.active.settle({ status: "saved", content: this.active.acceptContent });
-    return true;
-  }
+  // ---- reject entry point ---------------------------------------------------
 
   async rejectActiveDiff(): Promise<boolean> {
     if (!this.active) return false;
@@ -181,14 +163,19 @@ export class TerminalDiffFrontend implements EditorFrontend {
     return true;
   }
 
-  /** Closing a diff accepts it, matching the VS Code frontend's close_tab semantics. */
+  /**
+   * Close/dismiss the diff. In the terminal the ONLY accept is the pager's `y`
+   * (which clears the active diff before returning FILE_SAVED), so a close_tab that
+   * reaches a still-pending diff means the user dismissed/rejected it on the claude
+   * side — resolve it as rejected, never a silent accept.
+   */
   async closeTab(_tabName: string): Promise<void> {
-    if (this.active) this.active.settle({ status: "saved", content: this.active.acceptContent });
+    if (this.active) this.active.settle({ status: "rejected" });
   }
 
   async closeAllDiffTabs(): Promise<number> {
     if (!this.active) return 0;
-    this.active.settle({ status: "saved", content: this.active.acceptContent });
+    this.active.settle({ status: "rejected" });
     return 1;
   }
 
@@ -239,8 +226,8 @@ interface PagerView {
  */
 class Pager {
   private top = 0;
-  private rows = process.stdout.rows || 24;
-  private cols = process.stdout.columns || 80;
+  private rows = termRows();
+  private cols = termCols();
   private done = false;
   private resolve!: (verdict: "accept" | "reject") => void;
 
@@ -294,16 +281,16 @@ class Pager {
   }
 
   private onResize = (): void => {
-    this.rows = process.stdout.rows || 24;
-    this.cols = process.stdout.columns || 80;
+    this.rows = termRows();
+    this.cols = termCols();
     this.top = Math.min(this.top, this.maxTop());
     this.draw();
   };
 
   private onData = (buf: Buffer): void => {
     const k = buf.toString();
-    if (k === "y" || k === "Y" || k === "\r" || k === "\n") return this.finish("accept");
-    if (k === "n" || k === "N" || k === "q" || k === "\x03" || k === "\x1b") return this.finish("reject");
+    const v = keyVerdict(k);
+    if (v) return this.finish(v);
     if (k === "j" || k === "\x1b[B") return this.scroll(1);
     if (k === "k" || k === "\x1b[A") return this.scroll(-1);
     if (k === " " || k === "f" || k === "\x1b[6~") return this.scroll(this.viewH());
@@ -350,26 +337,36 @@ function bar(left: string, right: string, cols: number): string {
   return `\x1b[7m${s}\x1b[0m`;
 }
 
-/** Run a command, resolve its stdout, ignore a non-zero exit (git diff returns 1). */
-function capture(cmd: string, args: string[]): Promise<string> {
+/** Map a keystroke to an accept/reject verdict, or null if it's neither. */
+function keyVerdict(k: string): "accept" | "reject" | null {
+  if (k === "y" || k === "Y" || k === "\r" || k === "\n") return "accept";
+  if (k === "n" || k === "N" || k === "q" || k === "\x03" || k === "\x1b") return "reject";
+  return null;
+}
+
+/**
+ * Run a command and resolve its stdout, ignoring a non-zero exit (git diff returns
+ * 1 when files differ). With `input`, pipe it to stdin. Rejects if the command is
+ * missing (used to fall back from delta to git).
+ */
+function run(cmd: string, args: string[], input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawn(cmd, args, { stdio: [input == null ? "ignore" : "pipe", "pipe", "ignore"] });
     let out = "";
-    child.stdout.on("data", (d) => (out += d.toString()));
+    child.stdout?.on("data", (d) => (out += d.toString()));
     child.on("error", reject);
     child.on("close", () => resolve(out));
+    if (input != null) {
+      child.stdin?.on("error", () => undefined); // ignore EPIPE if the tool exits early
+      child.stdin?.end(input);
+    }
   });
 }
 
-/** Pipe `input` into a command's stdin and resolve its stdout. Rejects if the command is missing. */
-function pipeInput(input: string, cmd: string, args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ["pipe", "pipe", "ignore"] });
-    let out = "";
-    child.stdout.on("data", (d) => (out += d.toString()));
-    child.on("error", reject);
-    child.on("close", () => resolve(out));
-    child.stdin.on("error", () => undefined); // ignore EPIPE if the tool exits early
-    child.stdin.end(input);
-  });
+/** Terminal size, falling back to COLUMNS/LINES env then sane defaults (herdr panes can report 0). */
+function termCols(): number {
+  return process.stdout.columns || Number(process.env.COLUMNS) || 80;
+}
+function termRows(): number {
+  return process.stdout.rows || Number(process.env.LINES) || 24;
 }
