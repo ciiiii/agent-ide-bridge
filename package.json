@@ -5,6 +5,10 @@
   "version": "0.1.0",
   "publisher": "cai",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ciiiii/agent-ide-bridge.git"
+  },
   "engines": {
     "vscode": "^1.94.0"
   },
