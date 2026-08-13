@@ -48,12 +48,12 @@ if (!out.includes("\x1b[?1049h")) fail("diff did not open (no alt-screen)");
 conn.sock.terminate(); // simulate quitting claude: drop the socket abruptly
 
 await sleep(700);
-if (!/✗ rejected/.test(strip(out))) fail("diff was not closed on disconnect");
+if (!/handled in claude/.test(strip(out))) fail("diff was not closed as handled on disconnect");
 if (!out.includes("\x1b[?1049l")) fail("pager did not leave the alternate screen on disconnect");
 
 for (let i = 0; i < 20 && !exited; i++) await sleep(100); // idle-exit (1s) → process exits
 if (!exited) fail("viewer did not exit after the agent disconnected");
 
-console.log("PASS: disconnect → diff closed (✗ rejected, alt-screen left) → viewer exited");
+console.log("PASS: disconnect → diff closed (handled in claude, alt-screen left) → viewer exited");
 cleanup();
 process.exit(0);

@@ -23,9 +23,16 @@ export const ansi = {
   red: "\x1b[31m",
 };
 
+/**
+ * accept/reject come from the viewer's own y/n (a definite decision); "handled"
+ * means the diff was resolved on the claude side (close_tab / cancel / disconnect),
+ * where claude gives no reliable accept-vs-reject signal — so we don't guess.
+ */
+type Verdict = "accept" | "reject" | "handled";
+
 interface ActiveDiff {
   acceptContent: string;
-  settle: (outcome: DiffOutcome) => void;
+  settle: (verdict: Verdict) => void;
 }
 
 /**
@@ -42,16 +49,10 @@ export class TerminalDiffFrontend implements EditorFrontend {
   /** Serializes prompts so two sessions never fight over the one stdin. */
   private queue: Promise<unknown> = Promise.resolve();
   private active?: ActiveDiff;
-  private closeTimer?: ReturnType<typeof setTimeout>;
   private seq = 0;
 
-  /** Drop the active diff and any pending deferred-accept from close_tab. */
   private clearActive(): void {
     this.active = undefined;
-    if (this.closeTimer) {
-      clearTimeout(this.closeTimer);
-      this.closeTimer = undefined;
-    }
   }
 
   constructor(private readonly opts: { cwd: string; log: Logger }) {}
@@ -88,7 +89,7 @@ export class TerminalDiffFrontend implements EditorFrontend {
     });
     this.active = {
       acceptContent: request.newContent,
-      settle: (o) => (o.status === "saved" ? pager.acceptExternal() : pager.rejectExternal()),
+      settle: (v) => pager.external(v),
     };
     return pager.run().then((verdict) => {
       this.clearActive();
@@ -112,18 +113,17 @@ export class TerminalDiffFrontend implements EditorFrontend {
     return new Promise<DiffOutcome>((resolve) => {
       const stdin = process.stdin;
       let done = false;
-      const settle = (outcome: DiffOutcome) => {
+      const settle = (verdict: Verdict) => {
         if (done) return;
         done = true;
         stdin.removeListener("data", onData);
         stdin.pause();
         this.clearActive();
-        resolve(outcome);
+        resolve(verdict === "accept" ? { status: "saved", content: request.newContent } : { status: "rejected" });
       };
       const onData = (buf: Buffer) => {
         const v = keyVerdict(buf.toString());
-        if (v === "accept") settle({ status: "saved", content: request.newContent });
-        else if (v === "reject") settle({ status: "rejected" });
+        if (v) settle(v);
       };
       this.active = { acceptContent: request.newContent, settle };
       stdin.resume();
@@ -165,38 +165,29 @@ export class TerminalDiffFrontend implements EditorFrontend {
     }
   }
 
-  // ---- accept / reject entry points -----------------------------------------
+  // ---- resolution entry points ----------------------------------------------
+  //
+  // A definite accepted/rejected only comes from the viewer's own y/n (via the
+  // Pager). Everything below is the diff being resolved on the *claude* side —
+  // close_tab (claude sends it for BOTH accept and reject, indistinguishably),
+  // a cancel, or the agent disconnecting — so we don't guess a verdict; we mark
+  // it "handled in claude".
 
+  /** Cancel / disconnect from the claude side. */
   async rejectActiveDiff(): Promise<boolean> {
     if (!this.active) return false;
-    // Reject is authoritative and beats a pending deferred-accept from close_tab.
-    this.active.settle({ status: "rejected" });
+    this.active.settle("handled");
     return true;
   }
 
-  /**
-   * close_tab / closeAllDiffTabs are sent when the user acts on the *claude* side.
-   * claude sends close_tab for BOTH accept and reject, so it can't be resolved
-   * outright — but a reject also sends `notifications/cancelled` (→ rejectActiveDiff).
-   * So defer resolving close_tab as accepted; a cancel arriving in the window wins.
-   */
   async closeTab(_tabName: string): Promise<void> {
-    this.scheduleAcceptOnClose();
+    this.active?.settle("handled");
   }
 
   async closeAllDiffTabs(): Promise<number> {
     if (!this.active) return 0;
-    this.scheduleAcceptOnClose();
+    this.active.settle("handled");
     return 1;
-  }
-
-  private scheduleAcceptOnClose(): void {
-    const a = this.active;
-    if (!a || this.closeTimer) return;
-    this.closeTimer = setTimeout(() => {
-      this.closeTimer = undefined;
-      a.settle({ status: "saved", content: a.acceptContent });
-    }, 150);
   }
 
   // ---- stubbed editor queries (a terminal has none of these) ---------------
@@ -249,12 +240,12 @@ class Pager {
   private rows = termRows();
   private cols = termCols();
   private done = false;
-  private resolve!: (verdict: "accept" | "reject") => void;
+  private resolve!: (verdict: Verdict) => void;
 
   constructor(private readonly view: PagerView) {}
 
-  run(): Promise<"accept" | "reject"> {
-    const p = new Promise<"accept" | "reject">((res) => (this.resolve = res));
+  run(): Promise<Verdict> {
+    const p = new Promise<Verdict>((res) => (this.resolve = res));
     process.stdout.write("\x1b[?1049h\x1b[?25l\x1b[?7l"); // alt screen, hide cursor, no wrap
     if (process.stdin.isTTY) process.stdin.setRawMode(true);
     process.stdin.resume();
@@ -264,10 +255,10 @@ class Pager {
     return p;
   }
 
-  acceptExternal = (): void => this.finish("accept");
-  rejectExternal = (): void => this.finish("reject");
+  /** Resolve from the claude side (close_tab / cancel / disconnect). */
+  external = (verdict: Verdict): void => this.finish(verdict);
 
-  private finish(verdict: "accept" | "reject"): void {
+  private finish(verdict: Verdict): void {
     if (this.done) return;
     this.done = true;
     process.stdin.removeListener("data", this.onData);
@@ -275,11 +266,13 @@ class Pager {
     if (process.stdin.isTTY) process.stdin.setRawMode(false);
     process.stdin.pause();
     process.stdout.write("\x1b[?7h\x1b[?25h\x1b[?1049l"); // restore wrap, cursor, main screen
-    process.stdout.write(
+    const label =
       verdict === "accept"
-        ? `${ansi.green}✓ accepted${ansi.reset} ${ansi.dim}${this.view.subtitle}${ansi.reset}\n`
-        : `${ansi.red}✗ rejected${ansi.reset} ${ansi.dim}${this.view.subtitle}${ansi.reset}\n`
-    );
+        ? `${ansi.green}✓ accepted${ansi.reset}`
+        : verdict === "reject"
+        ? `${ansi.red}✗ rejected${ansi.reset}`
+        : `${ansi.dim}• handled in claude${ansi.reset}`;
+    process.stdout.write(`${label} ${ansi.dim}${this.view.subtitle}${ansi.reset}\n`);
     this.resolve(verdict);
   }
 

@@ -49,30 +49,32 @@ const t1 = texts(await diffP);
 if (t1[0] !== "FILE_SAVED") fail(`expected FILE_SAVED, got ${JSON.stringify(t1)}`);
 if (t1[1] !== newContent) fail("accepted content mismatch");
 
-// 2) close_tab alone = accept on the claude side → FILE_SAVED (after the ambiguity window)
-const c2 = "changed again\n";
+// Resolved on the CLAUDE side — the CLI never guesses accept-vs-reject here (claude
+// sends close_tab for both, indistinguishably), so it returns DIFF_REJECTED over the
+// wire and shows "handled in claude" (display checked in cli-handled.mjs). A definite
+// accepted/rejected only comes from the viewer's y/n (cli-pty.mjs / cli-reject.mjs).
+
+// 2) close_tab → handled → DIFF_REJECTED
 const diff2 = conn.rpc("tools/call", {
   name: "openDiff",
-  arguments: { old_file_path: file, new_file_path: file, new_file_contents: c2, tab_name: "✻ hello.txt #2" },
+  arguments: { old_file_path: file, new_file_path: file, new_file_contents: "changed again\n", tab_name: "✻ hello.txt #2" },
 });
 await sleep(300);
 await conn.rpc("tools/call", { name: "close_tab", arguments: { tab_name: "✻ hello.txt #2" } });
 const t2 = texts(await diff2);
-if (t2[0] !== "FILE_SAVED") fail(`close_tab alone should accept, got ${JSON.stringify(t2)}`);
-if (t2[1] !== c2) fail("accepted content mismatch (#2)");
+if (t2[0] !== "DIFF_REJECTED") fail(`close_tab should resolve handled→rejected, got ${JSON.stringify(t2)}`);
 
-// 3) close_tab then cancelled = reject on the claude side → DIFF_REJECTED (cancel wins the race)
+// 3) cancel → handled → DIFF_REJECTED
 const diff3 = conn.rpc("tools/call", {
   name: "openDiff",
   arguments: { old_file_path: file, new_file_path: file, new_file_contents: "changed thrice\n", tab_name: "✻ hello.txt #3" },
 });
 await sleep(300);
-await conn.rpc("tools/call", { name: "close_tab", arguments: { tab_name: "✻ hello.txt #3" } });
 conn.notify("notifications/cancelled", { requestId: "x", reason: "user rejected" });
 const t3 = texts(await diff3);
-if (t3[0] !== "DIFF_REJECTED") fail(`close_tab+cancelled should reject, got ${JSON.stringify(t3)}`);
+if (t3[0] !== "DIFF_REJECTED") fail(`cancel should resolve handled→rejected, got ${JSON.stringify(t3)}`);
 
-console.log("PASS: y→saved, close_tab→saved, close_tab+cancelled→rejected, workspace folders");
+console.log("PASS: y→saved, close_tab→handled, cancel→handled, workspace folders");
 conn.sock.close();
 child.kill();
 cleanup();
