@@ -103,7 +103,14 @@ async function main(): Promise<void> {
       return;
     }
     if (!everConnected) return;
-    void frontend.disconnectActiveDiff(); // close any open diff as "closed" — agent gone
+    // Resolve any open diff as "closed"; if none was open, print a session-level
+    // disconnect cue so the pane isn't just silently auto-closed.
+    void frontend.disconnectActiveDiff().then((hadDiff) => {
+      if (!hadDiff) {
+        const note = args.idleExit > 0 ? ` ${ansi.dim}(closing in ${args.idleExit}s)${ansi.reset}` : "";
+        process.stdout.write(`\n${ansi.yellow}· claude disconnected${ansi.reset}${note}\n`);
+      }
+    });
     if (args.idleExit > 0 && !idleTimer) {
       idleTimer = setTimeout(() => {
         log.info("last client disconnected; exiting");
