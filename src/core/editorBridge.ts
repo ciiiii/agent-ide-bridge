@@ -109,7 +109,19 @@ export class EditorBridge implements vscode.Disposable {
   /** Open a diff and resolve when the user accepts or rejects it. */
   async openDiff(request: DiffRequest): Promise<DiffOutcome> {
     const id = `${++this.seq}:${request.filePath}`;
-    const leftUri = vscode.Uri.file(request.filePath);
+    const fileUri = vscode.Uri.file(request.filePath);
+    // For a NEW (non-existent) file, diff against an empty left side. Using the
+    // real file URI when it doesn't exist errors with "The editor could not be
+    // opened because the file was not found."
+    let exists = true;
+    try {
+      await vscode.workspace.fs.stat(fileUri);
+    } catch {
+      exists = false;
+    }
+    const leftUri = exists
+      ? fileUri
+      : vscode.Uri.from({ scheme: PROPOSED_SCHEME, path: request.filePath, query: `empty:${id}` });
     const rightUri = vscode.Uri.from({
       scheme: PROPOSED_SCHEME,
       path: request.filePath, // keeps the filename visible in the diff title
