@@ -51,6 +51,15 @@ export class EditorBridge implements vscode.Disposable {
       })
     );
 
+    // Close leftover proposed-diff tabs from a previous window session — their
+    // in-memory content is gone after a reload, so restoring them errors with
+    // "The editor could not be opened because the file was not found."
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (diffRightUri(tab)) void vscode.window.tabGroups.close(tab, false);
+      }
+    }
+
     // Selection / active-editor changes → neutral SelectionInfo.
     const emitSelection = () => {
       const info = this.getCurrentSelection();
@@ -161,10 +170,10 @@ export class EditorBridge implements vscode.Disposable {
   }
 
   private async acceptPending(p: PendingDiff): Promise<void> {
-    await vscode.workspace.fs.writeFile(
-      vscode.Uri.file(p.request.filePath),
-      Buffer.from(p.request.newContent, "utf8")
-    );
+    // Do NOT write the file here. openDiff only PREVIEWS the change; the CLI
+    // applies the edit itself after we return FILE_SAVED. Writing here changes
+    // the file mid-edit and trips the CLI's "File content has changed since it
+    // was last read" guard.
     // Settle BEFORE closing the tab so the close listener doesn't race us to
     // "rejected" (settle removes p from `pending`, making that handler a no-op).
     this.settle(p, { status: "saved", content: p.request.newContent });

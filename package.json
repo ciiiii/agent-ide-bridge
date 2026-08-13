@@ -2,7 +2,7 @@
   "name": "claude-ide-bridge",
   "displayName": "Claude IDE Bridge",
   "description": "Multi-client IDE diff bridge: lets several Claude Code sessions share one code-server window (in-editor diffs, accept/reject). Replaces the single-client official integration.",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "publisher": "cai",
   "license": "MIT",
   "engines": {

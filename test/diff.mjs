@@ -60,7 +60,9 @@ const payload = content[1]?.text;
 const onDisk = readFileSync(file, "utf8");
 console.log("close_tab result:", JSON.stringify(closeRes.result));
 console.log("openDiff marker:", marker, "| payload matches newContent:", payload === newContent);
-console.log("file written correctly:", onDisk === newContent);
-const pass = marker === "FILE_SAVED" && onDisk === newContent;
-console.log(pass ? "PASS ✅ openDiff accept writes file + returns FILE_SAVED" : "FAIL ❌");
+// The bridge only PREVIEWS the diff — it must NOT write the file (the CLI does),
+// so on disk the file is still the original here.
+console.log("bridge left the file unwritten (CLI writes it):", onDisk !== newContent);
+const pass = marker === "FILE_SAVED" && payload === newContent && onDisk !== newContent;
+console.log(pass ? "PASS ✅ openDiff previews + returns [FILE_SAVED, content]; bridge does not write" : "FAIL ❌");
 process.exit(pass ? 0 : 1);
