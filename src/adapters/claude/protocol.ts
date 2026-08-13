@@ -1,7 +1,5 @@
-// Claude Code IDE protocol constants (reverse-engineered from the official
-// extension). Verified against the live ~/.claude/ide/*.lock files and the
-// extension's connection handler; exact tool schemas are confirmed by the
-// protocol spec doc and by capturing a real `claude` handshake.
+// Claude Code IDE protocol constants (MCP over WebSocket). Verified against the
+// live ~/.claude/ide/*.lock files and a real `claude` handshake.
 
 /** WebSocket upgrade header carrying the lockfile authToken. */
 export const AUTH_HEADER = "x-claude-code-ide-authorization";

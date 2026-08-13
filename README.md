@@ -6,12 +6,11 @@ sessions share **one** code-server window — each with working in-editor diffs
 
 ## Why
 
-The official Anthropic extension runs a **single-client** IDE server: every new
-`claude` connection evicts the previous one (`Disconnecting previous WebSocket
-client`). So two sessions in one window fight over the slot and only the newest
-gets diffs. This extension speaks the same Claude IDE protocol (MCP over
-WebSocket, discovered via `~/.claude/ide/<port>.lock`) but keeps **all**
-connected clients and multiplexes them onto the one window.
+By default only one Claude Code session can attach to a code-server window at a
+time, so two sessions in one window fight over the slot and only the newest gets
+diffs. This extension speaks the Claude IDE protocol (MCP over WebSocket,
+discovered via `~/.claude/ide/<port>.lock`) but keeps **all** connected clients
+and multiplexes them onto the one window.
 
 ## Architecture
 
@@ -51,5 +50,5 @@ Accept / reject the focused diff: `Cmd+Enter` / `Cmd+Backspace` (bound to
 
 ## Status
 
-Diff bridge only — no chat/webview. Protocol reverse-engineered from the
-official extension; see the in-repo notes for the message spec.
+Diff bridge only — no chat/webview. Implements the Claude Code IDE protocol
+(MCP over WebSocket).

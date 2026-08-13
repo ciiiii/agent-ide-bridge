@@ -1,7 +1,7 @@
 {
   "name": "agent-ide-bridge",
   "displayName": "Agent IDE Bridge",
-  "description": "Multi-client IDE diff bridge: lets several Claude Code sessions share one code-server window (in-editor diffs, accept/reject). Replaces the single-client official integration.",
+  "description": "Multi-client IDE diff bridge: lets several Claude Code sessions share one code-server window (in-editor diffs, accept/reject).",
   "version": "0.1.0",
   "publisher": "cai",
   "license": "MIT",

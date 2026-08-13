@@ -1,5 +1,5 @@
 // Proves the core win: TWO clients connect to one window and BOTH stay
-// connected (the official single-client server would evict the first).
+// connected (a single-client server would evict the first).
 import { readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

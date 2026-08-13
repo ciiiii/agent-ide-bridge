@@ -26,9 +26,8 @@ interface ClientMeta {
 /**
  * Claude Code IDE protocol adapter: a MULTI-CLIENT MCP-over-WebSocket server.
  *
- * Unlike the official extension (single client, evicts the previous connection)
- * this keeps every authenticated client and multiplexes them onto one shared
- * EditorBridge — so several `claude` sessions share one code-server window.
+ * Keeps every authenticated client and multiplexes them onto one shared
+ * EditorBridge, so several `claude` sessions share one code-server window.
  */
 export class ClaudeAdapter implements vscode.Disposable {
   private wss?: WebSocketServer;
