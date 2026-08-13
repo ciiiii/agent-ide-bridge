@@ -2,12 +2,8 @@ import esbuild from "esbuild";
 
 const watch = process.argv.includes("--watch");
 
-/** @type {import('esbuild').BuildOptions} */
-const options = {
-  entryPoints: ["src/extension.ts"],
+const common = {
   bundle: true,
-  outfile: "dist/extension.js",
-  external: ["vscode"], // provided by the extension host
   format: "cjs",
   platform: "node",
   target: "node18",
@@ -16,10 +12,28 @@ const options = {
   logLevel: "info",
 };
 
+/** VS Code extension bundle. @type {import('esbuild').BuildOptions} */
+const extension = {
+  ...common,
+  entryPoints: ["src/extension.ts"],
+  outfile: "dist/extension.js",
+  external: ["vscode"], // provided by the extension host
+};
+
+/** Standalone terminal diff CLI. @type {import('esbuild').BuildOptions} */
+const cli = {
+  ...common,
+  entryPoints: ["src/cli/index.ts"],
+  outfile: "dist/cli.js",
+  banner: { js: "#!/usr/bin/env node" },
+};
+
 if (watch) {
-  const ctx = await esbuild.context(options);
-  await ctx.watch();
+  for (const opts of [extension, cli]) {
+    const ctx = await esbuild.context(opts);
+    await ctx.watch();
+  }
   console.log("[esbuild] watching…");
 } else {
-  await esbuild.build(options);
+  await Promise.all([esbuild.build(extension), esbuild.build(cli)]);
 }
