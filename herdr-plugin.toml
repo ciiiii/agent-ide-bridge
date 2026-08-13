@@ -1,27 +1,35 @@
 id = "cai.agent-ide-bridge"
 name = "agent-ide-bridge"
-version = "0.1.0"
+version = "0.1.0" # x-release-please-version
 min_herdr_version = "0.7.5"
 platforms = ["macos", "linux"]
 description = "Show Claude's proposed diffs (accept/reject) in a herdr pane beside the agent."
 
-# On `herdr plugin install`, build the terminal diff CLI (dist/cli.js). Skipped by
+# On `herdr plugin install`, fetch the prebuilt claude-diff bundle from the latest
+# release (curl + node, no toolchain), falling back to an npm build. Skipped by
 # `herdr plugin link` for a local checkout — run `npm ci && npm run build` yourself.
 [[build]]
-command = ["npm", "ci"]
-
-[[build]]
-command = ["npm", "run", "build"]
+command = ["bash", "herdr/install.sh"]
 
 # The viewer pane: runs the CLI as an IDE server that `claude` connects to. Its cwd is
 # the repo under review (herdr sets it via `plugin pane open --cwd`), which the CLI
 # advertises in ~/.claude/ide/<port>.lock so `/ide` in the claude pane finds it.
-# AIB_DIFF_PORT overrides the port (default 8990, distinct from the code-server bridge's 8991).
+# Launched via viewer.sh (referenced by $HERDR_PLUGIN_ROOT, since the pane's cwd is the
+# agent's dir, not the plugin root) which restores PATH so `node` resolves under herdr's
+# minimal PATH and binds a deterministic per-workspace port (AIB_DIFF_PORT overrides).
 [[panes]]
 id = "diff"
 title = "claude-diff"
 placement = "split"
-command = ["sh", "-c", 'exec node "$HERDR_PLUGIN_ROOT/dist/cli.js" --port "${AIB_DIFF_PORT:-8990}" --ide-name claude-diff']
+command = ["sh", "-c", 'exec bash "$HERDR_PLUGIN_ROOT/herdr/viewer.sh"']
+
+# One-step: open the viewer beside this pane AND launch claude here already
+# connected (no separate toggle / no /ide). Bind this to a key for "start claude".
+[[actions]]
+id = "start"
+title = "claude: start with diff viewer"
+contexts = ["pane", "workspace"]
+command = ["bash", "herdr/start.sh"]
 
 [[actions]]
 id = "toggle"
@@ -40,3 +48,10 @@ id = "close"
 title = "claude-diff: close viewer"
 contexts = ["pane", "workspace"]
 command = ["bash", "herdr/pane.sh", "close"]
+
+# Auto-open a viewer for a freshly created worktree/workspace (a new agent session
+# in herdr's model). Gated by AIB_AUTO_OPEN=0. The viewer auto-closes itself ~5s
+# after the agent disconnects (CLI --idle-exit), so there's no close event needed.
+[[events]]
+on = "worktree.created"
+command = ["bash", "herdr/pane.sh", "auto-open"]

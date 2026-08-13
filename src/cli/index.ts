@@ -1,22 +1,30 @@
 import { resolve } from "node:path";
 import { ClaudeAdapter } from "../adapters/claude/server";
 import { Logger } from "../core/types";
-import { TerminalDiffFrontend } from "./terminalFrontend";
+import { TerminalDiffFrontend, ansi } from "./terminalFrontend";
 
 interface Args {
   port: number;
   dir: string;
   ideName: string;
   verbose: boolean;
+  idleExit: number; // seconds after the last client disconnects before exiting; 0 = never
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { port: 8991, dir: process.cwd(), ideName: "terminal", verbose: false };
+  const a: Args = {
+    port: 8991,
+    dir: process.cwd(),
+    ideName: "terminal",
+    verbose: false,
+    idleExit: 0,
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--port" || arg === "-p") a.port = Number(argv[++i]);
     else if (arg === "--dir" || arg === "-C") a.dir = argv[++i];
     else if (arg === "--ide-name") a.ideName = argv[++i];
+    else if (arg === "--idle-exit") a.idleExit = Number(argv[++i]);
     else if (arg === "--verbose" || arg === "-v") a.verbose = true;
     else if (arg === "--help" || arg === "-h") {
       printHelp();
@@ -24,6 +32,7 @@ function parseArgs(argv: string[]): Args {
     }
   }
   if (!Number.isFinite(a.port)) a.port = 8991;
+  if (!Number.isFinite(a.idleExit)) a.idleExit = 0;
   a.dir = resolve(a.dir); // lockfile workspaceFolders / /ide need an absolute path
   return a;
 }
@@ -35,6 +44,7 @@ function printHelp(): void {
       `  -p, --port <n>     preferred localhost port (default 8991, 0 = random)\n` +
       `  -C, --dir <path>   workspace folder to advertise (default cwd)\n` +
       `      --ide-name <s>  IDE name in the lockfile (default "terminal")\n` +
+      `      --idle-exit <s> exit N seconds after the last client disconnects (0 = never)\n` +
       `  -v, --verbose      log protocol traffic to stderr\n` +
       `  -h, --help          show this help\n`
   );
@@ -64,9 +74,9 @@ async function main(): Promise<void> {
   await adapter.start();
   const port = adapter.port;
   process.stdout.write(
-    `\x1b[1mclaude-diff\x1b[0m listening on 127.0.0.1:${port}  (workspace: ${args.dir})\n` +
-      `\x1b[2mIn your claude pane:  export CLAUDE_CODE_SSE_PORT=${port}   then run  claude\n` +
-      `(or run claude and use /ide to pick this session)\x1b[0m\n`
+    `${ansi.bold}claude-diff${ansi.reset} listening on 127.0.0.1:${port}  (workspace: ${args.dir})\n` +
+      `${ansi.dim}In your claude pane:  export CLAUDE_CODE_SSE_PORT=${port}   then run  claude\n` +
+      `(or run claude and use /ide to pick this session)${ansi.reset}\n`
   );
 
   const shutdown = () => {
@@ -75,6 +85,32 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // React to the agent disconnecting (claude quit / pane closed):
+  //  - resolve any diff still awaiting a verdict, so the viewer doesn't sit frozen
+  //    on a diff whose agent is gone (claude may drop the socket without cancelling);
+  //  - if --idle-exit is set, exit after a grace period so herdr closes this pane.
+  // The grace absorbs brief drops (e.g. a reconnect via /ide).
+  let everConnected = false;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  adapter.onClientsChanged(() => {
+    if (adapter.clientCount > 0) {
+      everConnected = true;
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = undefined;
+      }
+      return;
+    }
+    if (!everConnected) return;
+    void frontend.rejectActiveDiff(); // close any open diff — its agent is gone
+    if (args.idleExit > 0 && !idleTimer) {
+      idleTimer = setTimeout(() => {
+        log.info("last client disconnected; exiting");
+        shutdown();
+      }, args.idleExit * 1000);
+    }
+  });
 }
 
 main().catch((err) => {
