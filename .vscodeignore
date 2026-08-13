@@ -9,3 +9,5 @@ tsconfig.json
 .gitignore
 .vscodeignore
 **/*.ts
+herdr-plugin.toml
+herdr/**

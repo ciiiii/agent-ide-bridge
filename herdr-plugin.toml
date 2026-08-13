@@ -1,0 +1,42 @@
+id = "cai.agent-ide-bridge"
+name = "agent-ide-bridge"
+version = "0.1.0"
+min_herdr_version = "0.7.5"
+platforms = ["macos", "linux"]
+description = "Show Claude's proposed diffs (accept/reject) in a herdr pane beside the agent."
+
+# On `herdr plugin install`, build the terminal diff CLI (dist/cli.js). Skipped by
+# `herdr plugin link` for a local checkout — run `npm ci && npm run build` yourself.
+[[build]]
+command = ["npm", "ci"]
+
+[[build]]
+command = ["npm", "run", "build"]
+
+# The viewer pane: runs the CLI as an IDE server that `claude` connects to. Its cwd is
+# the repo under review (herdr sets it via `plugin pane open --cwd`), which the CLI
+# advertises in ~/.claude/ide/<port>.lock so `/ide` in the claude pane finds it.
+# AIB_DIFF_PORT overrides the port (default 8990, distinct from the code-server bridge's 8991).
+[[panes]]
+id = "diff"
+title = "claude-diff"
+placement = "split"
+command = ["sh", "-c", 'exec node "$HERDR_PLUGIN_ROOT/dist/cli.js" --port "${AIB_DIFF_PORT:-8990}" --ide-name claude-diff']
+
+[[actions]]
+id = "toggle"
+title = "claude-diff: toggle viewer"
+contexts = ["pane", "workspace"]
+command = ["bash", "herdr/pane.sh", "toggle"]
+
+[[actions]]
+id = "open"
+title = "claude-diff: open viewer"
+contexts = ["pane", "workspace"]
+command = ["bash", "herdr/pane.sh", "open"]
+
+[[actions]]
+id = "close"
+title = "claude-diff: close viewer"
+contexts = ["pane", "workspace"]
+command = ["bash", "herdr/pane.sh", "close"]
