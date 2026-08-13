@@ -21,6 +21,7 @@ export const ansi = {
   cyan: "\x1b[36m",
   green: "\x1b[32m",
   red: "\x1b[31m",
+  yellow: "\x1b[33m",
 };
 
 /**
@@ -279,8 +280,8 @@ class Pager {
         : verdict === "reject"
         ? `${ansi.red}✗ rejected${ansi.reset}`
         : verdict === "handled"
-        ? `${ansi.dim}· handled${ansi.reset}`
-        : `${ansi.dim}· closed${ansi.reset}`;
+        ? `${ansi.cyan}· handled${ansi.reset}`
+        : `${ansi.yellow}· closed${ansi.reset}`;
     process.stdout.write(`${label} ${ansi.dim}${basename(this.view.subtitle)}${ansi.reset}\n`);
     this.resolve(verdict);
   }
