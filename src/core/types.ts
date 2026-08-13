@@ -1,6 +1,5 @@
 // Tool-agnostic types shared between the editor core and protocol adapters.
 // Nothing here knows about Claude, MCP, or any specific CLI wire format.
-// (diff test — safe to revert)
 
 export interface DiffRequest {
   /** Absolute path of the real on-disk file (left side of the diff). */
@@ -81,7 +80,6 @@ export interface EditorFrontend {
   openDiff(request: DiffRequest): Promise<DiffOutcome>;
   closeTab(tabName: string): Promise<void>;
   closeAllDiffTabs(): Promise<number>;
-  acceptActiveDiff(): Promise<boolean>;
   rejectActiveDiff(): Promise<boolean>;
   getCurrentSelection(): SelectionInfo | null;
   getOpenEditors(): OpenEditorInfo[];

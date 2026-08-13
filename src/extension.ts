@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import * as vscode from "vscode";
 import { EditorBridge } from "./core/editorBridge";
 import { ClaudeAdapter } from "./adapters/claude/server";
@@ -76,10 +77,6 @@ function showConnections(adapter: ClaudeAdapter | undefined): void {
   qp.onDidAccept(() => qp.hide());
   qp.onDidHide(() => qp.dispose());
   qp.show();
-}
-
-function basename(p: string): string {
-  return p.replace(/\/+$/, "").split("/").pop() || p;
 }
 
 export function deactivate(): void {
