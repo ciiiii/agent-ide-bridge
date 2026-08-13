@@ -42,7 +42,17 @@ export class TerminalDiffFrontend implements EditorFrontend {
   /** Serializes prompts so two sessions never fight over the one stdin. */
   private queue: Promise<unknown> = Promise.resolve();
   private active?: ActiveDiff;
+  private closeTimer?: ReturnType<typeof setTimeout>;
   private seq = 0;
+
+  /** Drop the active diff and any pending deferred-accept from close_tab. */
+  private clearActive(): void {
+    this.active = undefined;
+    if (this.closeTimer) {
+      clearTimeout(this.closeTimer);
+      this.closeTimer = undefined;
+    }
+  }
 
   constructor(private readonly opts: { cwd: string; log: Logger }) {}
 
@@ -81,7 +91,7 @@ export class TerminalDiffFrontend implements EditorFrontend {
       settle: (o) => (o.status === "saved" ? pager.acceptExternal() : pager.rejectExternal()),
     };
     return pager.run().then((verdict) => {
-      this.active = undefined;
+      this.clearActive();
       return verdict === "accept"
         ? { status: "saved", content: request.newContent }
         : { status: "rejected" };
@@ -107,7 +117,7 @@ export class TerminalDiffFrontend implements EditorFrontend {
         done = true;
         stdin.removeListener("data", onData);
         stdin.pause();
-        this.active = undefined;
+        this.clearActive();
         resolve(outcome);
       };
       const onData = (buf: Buffer) => {
@@ -155,28 +165,38 @@ export class TerminalDiffFrontend implements EditorFrontend {
     }
   }
 
-  // ---- reject entry point ---------------------------------------------------
+  // ---- accept / reject entry points -----------------------------------------
 
   async rejectActiveDiff(): Promise<boolean> {
     if (!this.active) return false;
+    // Reject is authoritative and beats a pending deferred-accept from close_tab.
     this.active.settle({ status: "rejected" });
     return true;
   }
 
   /**
-   * Close/dismiss the diff. In the terminal the ONLY accept is the pager's `y`
-   * (which clears the active diff before returning FILE_SAVED), so a close_tab that
-   * reaches a still-pending diff means the user dismissed/rejected it on the claude
-   * side — resolve it as rejected, never a silent accept.
+   * close_tab / closeAllDiffTabs are sent when the user acts on the *claude* side.
+   * claude sends close_tab for BOTH accept and reject, so it can't be resolved
+   * outright — but a reject also sends `notifications/cancelled` (→ rejectActiveDiff).
+   * So defer resolving close_tab as accepted; a cancel arriving in the window wins.
    */
   async closeTab(_tabName: string): Promise<void> {
-    if (this.active) this.active.settle({ status: "rejected" });
+    this.scheduleAcceptOnClose();
   }
 
   async closeAllDiffTabs(): Promise<number> {
     if (!this.active) return 0;
-    this.active.settle({ status: "rejected" });
+    this.scheduleAcceptOnClose();
     return 1;
+  }
+
+  private scheduleAcceptOnClose(): void {
+    const a = this.active;
+    if (!a || this.closeTimer) return;
+    this.closeTimer = setTimeout(() => {
+      this.closeTimer = undefined;
+      a.settle({ status: "saved", content: a.acceptContent });
+    }, 150);
   }
 
   // ---- stubbed editor queries (a terminal has none of these) ---------------
