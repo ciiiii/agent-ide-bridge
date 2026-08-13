@@ -39,6 +39,16 @@ npm run package        # -> agent-ide-bridge.vsix
 
 ## Install (code-server)
 
+Grab the packaged `.vsix` from the latest release and install it:
+
+```bash
+curl -fsSL -o /tmp/aib.vsix \
+  https://github.com/ciiiii/agent-ide-bridge/releases/latest/download/agent-ide-bridge.vsix \
+  && code-server --install-extension /tmp/aib.vsix
+```
+
+Or build from source (`npm run package`) and install the local file:
+
 ```bash
 code-server --install-extension agent-ide-bridge.vsix
 code-server --uninstall-extension anthropic.claude-code   # avoid lockfile conflicts
