@@ -1,22 +1,118 @@
 # Agent IDE Bridge
 
-A **multi-client** IDE diff bridge for code-server. It lets several Claude Code
-sessions share **one** code-server window — each with working in-editor diffs
-(accept/reject), selection context, and diagnostics.
+Bridges the **Claude Code IDE protocol** (MCP over WebSocket, discovered via
+`~/.claude/ide/<port>.lock`) so Claude's **proposed diffs** (accept/reject in an
+editor), selection context, and diagnostics reach a frontend — and lets **several
+Claude sessions share one frontend** instead of fighting over the single slot.
+
+Two frontends, three ways to run it — pick one:
+
+- **[code-server / VS Code](#code-server--vs-code)** — several Claude sessions → one
+  browser window, with in-editor diffs.
+- **[herdr](#herdr)** — Claude in herdr panes → a `claude-diff` pane beside each
+  agent, no browser.
+- **[Standalone terminal](#standalone-terminal)** — `claude-diff` in any two
+  terminals, no herdr, no browser.
 
 ## Why
 
-By default only one Claude Code session can attach to a code-server window at a
-time, so two sessions in one window fight over the slot and only the newest gets
-diffs. This extension speaks the Claude IDE protocol (MCP over WebSocket,
-discovered via `~/.claude/ide/<port>.lock`) but keeps **all** connected clients
-and multiplexes them onto the one window.
+By default only one Claude session can attach to a window at a time — two sessions
+fight over the slot and only the newest gets diffs. This bridge keeps **all**
+connected clients and multiplexes them onto one frontend.
+
+---
+
+## code-server / VS Code
+
+Several Claude sessions share one code-server window with working in-editor diffs
+(accept/reject), selection context, and diagnostics.
+
+**Install** — grab the `.vsix` from the latest release:
+
+```bash
+curl -fsSL -o /tmp/aib.vsix \
+  https://github.com/ciiiii/agent-ide-bridge/releases/latest/download/agent-ide-bridge.vsix \
+  && code-server --install-extension /tmp/aib.vsix
+code-server --uninstall-extension anthropic.claude-code   # avoid lockfile conflicts
+# reload the window (or restart the code-server service)
+```
+
+(Or build from source: `npm run package` → `code-server --install-extension agent-ide-bridge.vsix`.)
+
+**Use** — run `claude` in the window's integrated terminal (it auto-connects), or
+run `/ide` from any terminal and pick this window. Accept / reject the focused diff
+with `Cmd+Enter` / `Cmd+Backspace`.
+
+---
+
+## herdr
+
+`claude-diff` runs in a herdr pane **beside the agent**, rendering Claude's proposed
+diffs (through [`delta`](https://github.com/dandavison/delta) when present) in a
+scrollable pager. Prereqs on the host: `node` ≥ 18 and `jq`; `delta` optional.
+
+**Install** — fetches the prebuilt `claude-diff` from the release (curl + node, no
+toolchain), falling back to an npm build if unavailable:
+
+```bash
+herdr plugin install ciiiii/agent-ide-bridge               # latest release
+herdr plugin install ciiiii/agent-ide-bridge --ref v0.2.0  # pin a version
+```
+
+(Local dev: `herdr plugin link .` then `npm ci && npm run build` — `link` skips the build.)
+
+**Use** — bind the one-step launcher in `~/.config/herdr/config.toml`, then
+`herdr server reload-config`:
+
+```toml
+[[keys.command]]
+key = "prefix+d"                        # ctrl+b then d
+type = "plugin_action"
+command = "cai.agent-ide-bridge.start"
+description = "start claude + diff viewer"
+```
+
+That key opens the viewer beside your pane and launches `claude` there already
+connected — no `/ide`. (Manual alternative: invoke `…toggle` to open the viewer,
+then `/ide` in the claude pane and pick `claude-diff`.)
+
+- **Pager keys:** `j`/`k` line · `space`/`b` page · `g`/`G` ends · `y`/⏎ accept · `n`/esc reject.
+- **Auto:** a viewer auto-opens for a new worktree (`worktree.created`; `AIB_AUTO_OPEN=0`
+  to disable) and auto-closes ~5s after claude exits (`AIB_IDLE_EXIT` seconds, `0` = never).
+- **Config:** `AIB_DIFF_PORT` (default: a stable per-workspace port), `AIB_DIFF_DIRECTION` (default `right`).
+- **Over `herdr --remote`:** keybindings resolve per `--remote-keybindings local|server` —
+  put the binding on whichever side that selects.
+
+---
+
+## Standalone terminal
+
+`claude-diff` in a plain terminal — no herdr, no browser. Grab the bundle (needs
+`node` ≥ 18; `jq`/`delta` optional):
+
+```bash
+curl -fsSL -o claude-diff \
+  https://github.com/ciiiii/agent-ide-bridge/releases/latest/download/claude-diff \
+  && chmod +x claude-diff
+```
+
+Run it in one tab and `claude` in another:
+
+```bash
+./claude-diff --dir ~/your/project        # tab 1 — prints its port
+cd ~/your/project
+CLAUDE_CODE_SSE_PORT=<port> claude        # tab 2  (or run claude, then /ide)
+```
+
+Same pager keys as the [herdr setup](#herdr).
+
+---
 
 ## Architecture
 
 The Claude adapter (the MCP-over-WS server) is frontend-agnostic: it drives an
-`EditorFrontend`, of which there are two — VS Code and the terminal. Same
-protocol, two surfaces.
+`EditorFrontend`, of which there are two — VS Code and the terminal. Same protocol,
+two surfaces.
 
 ```
 src/
@@ -28,17 +124,16 @@ src/
       server.ts
       lockfile.ts
       protocol.ts
-  cli/               # EditorFrontend #2 — terminal diff pager (the CLI)
+  cli/               # EditorFrontend #2 — terminal diff pager (claude-diff)
     index.ts
     terminalFrontend.ts
   extension.ts       # wires the VS Code frontend + adapter + accept/reject commands
 
 herdr-plugin.toml    # herdr plugin: run the CLI in a pane beside the agent
-herdr/pane.sh
+herdr/               # pane.sh / start.sh / viewer.sh / lib.sh
 ```
 
-`core/` and `adapters/claude/` know nothing about VS Code; the CLI reuses them
-verbatim.
+`core/` and `adapters/claude/` know nothing about VS Code; the CLI reuses them verbatim.
 
 ## Build
 
@@ -50,65 +145,11 @@ npm test               # e2e: drive the CLI over the Claude protocol (non-TTY pa
 npm run test:tui       # e2e: the interactive pager, driven through a real pty
 ```
 
-## Install (code-server)
-
-Grab the packaged `.vsix` from the latest release and install it:
-
-```bash
-curl -fsSL -o /tmp/aib.vsix \
-  https://github.com/ciiiii/agent-ide-bridge/releases/latest/download/agent-ide-bridge.vsix \
-  && code-server --install-extension /tmp/aib.vsix
-```
-
-Or build from source (`npm run package`) and install the local file:
-
-```bash
-code-server --install-extension agent-ide-bridge.vsix
-code-server --uninstall-extension anthropic.claude-code   # avoid lockfile conflicts
-# reload the window (or restart the code-server service)
-```
-
-Accept / reject the focused diff: `Cmd+Enter` / `Cmd+Backspace` (bound to
-`claude-code.acceptProposedDiff` / `…rejectProposedDiff`).
-
-## Terminal / herdr (no code-server)
-
-The same bridge, without a browser: `dist/cli.js` (`claude-diff`) is a terminal
-frontend that renders Claude's **proposed** diffs (accept/reject) right in a
-terminal — rendered through [`delta`](https://github.com/dandavison/delta) when
-present, with a scrollable pager (`j`/`k`, `space`/`b`, `g`/`G`, `y`/`n`).
-
-Run it standalone in any terminal:
-
-```bash
-node dist/cli.js --dir ~/your/project        # prints its port + connect hint
-# then, in another terminal:
-cd ~/your/project
-export CLAUDE_CODE_SSE_PORT=<port> && claude  # or run claude, then /ide
-```
-
-### As a herdr plugin
-
-`herdr-plugin.toml` opens the CLI in a pane **beside the agent**, so Claude's
-diffs show next to the session that proposed them:
-
-```bash
-herdr plugin link .        # local checkout (then: npm ci && npm run build)
-# or: herdr plugin install <this repo/release>   (runs the build automatically)
-```
-
-Then, from inside herdr:
-
-- Invoke **`claude-diff: toggle viewer`** (`herdr plugin action invoke cai.agent-ide-bridge.toggle`)
-  to open the viewer pane to the right of the current agent.
-- In the claude pane, run **`/ide`** to connect (or `export CLAUDE_CODE_SSE_PORT`
-  before launching `claude`). Its proposed diffs now render in the viewer pane.
-
-The viewer defaults to port `8990` (override with `AIB_DIFF_PORT`) and its split
-side to `right` (`AIB_DIFF_DIRECTION`). Requires `jq`.
+Releases (via release-please) attach both frontends: `agent-ide-bridge.vsix` and the
+standalone `claude-diff` bundle.
 
 ## Status
 
-Diff bridge only — no chat/webview. Implements the Claude Code IDE protocol
-(MCP over WebSocket), with two frontends: VS Code / code-server and a terminal
-CLI (usable standalone or as a herdr plugin).
+Diff bridge only — no chat/webview. Implements the Claude Code IDE protocol (MCP over
+WebSocket), with two frontends: VS Code / code-server and a terminal CLI (usable
+standalone or as a herdr plugin).
