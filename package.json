@@ -61,7 +61,7 @@
     "build": "node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "package": "vsce package --no-dependencies -o agent-ide-bridge.vsix"
+    "package": "npm run build && vsce package --no-dependencies -o agent-ide-bridge.vsix"
   },
   "dependencies": {
     "ws": "^8.18.0"
