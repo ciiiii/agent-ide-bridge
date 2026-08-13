@@ -19,7 +19,7 @@ export const SUPPORTED_PROTOCOL_VERSIONS = [
 
 export const SERVER_INFO = {
   name: "Agent IDE Bridge MCP",
-  version: "0.0.1", // x-release-please-version
+  version: "0.2.0", // x-release-please-version
 };
 
 /** IDE tools exposed via tools/list and invoked via tools/call. */
