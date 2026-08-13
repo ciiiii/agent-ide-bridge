@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/ciiiii/agent-ide-bridge/compare/v0.1.0...v0.1.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* build the extension before packaging the vsix ([96b848f](https://github.com/ciiiii/agent-ide-bridge/commit/96b848f03c186e46b08cb8cfcdc1ce0e64f8aa77))
+
 ## 0.1.0 (2026-08-13)
 
 
