@@ -1,8 +1,13 @@
 import type { IncomingMessage } from "node:http";
-import * as vscode from "vscode";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { RawData, WebSocket, WebSocketServer } from "ws";
-import { EditorBridge } from "../../core/editorBridge";
-import { SelectionInfo } from "../../core/types";
+import {
+  ConnectionInfo,
+  Disposable,
+  EditorFrontend,
+  Logger,
+  SelectionInfo,
+} from "../../core/types";
 import { cleanupStaleLocks, writeLock, removeLock } from "./lockfile";
 import {
   AUTH_HEADER,
@@ -10,7 +15,6 @@ import {
   DIFF_RESULT,
   NOTIFY,
   SERVER_INFO,
-  SSE_PORT_ENV,
   SUPPORTED_PROTOCOL_VERSIONS,
   TOOL,
 } from "./protocol";
@@ -23,75 +27,74 @@ interface ClientMeta {
   folder?: string; // the session's project root (from roots/list)
 }
 
+export interface ClaudeAdapterOptions {
+  /** Preferred localhost port, kept stable so sessions reconnect. 0 = random. */
+  port: number;
+  /** IDE name advertised in the lockfile / picker (e.g. "code-server", "ghostty"). */
+  ideName: string;
+  log: Logger;
+}
+
 /**
  * Claude Code IDE protocol adapter: a MULTI-CLIENT MCP-over-WebSocket server.
  *
  * Keeps every authenticated client and multiplexes them onto one shared
- * EditorBridge, so several `claude` sessions share one code-server window.
+ * EditorFrontend, so several `claude` sessions share one diff surface. The
+ * frontend may be VS Code (EditorBridge) or the terminal (TerminalDiffFrontend);
+ * this class never touches either concretely.
  */
-export class ClaudeAdapter implements vscode.Disposable {
+export class ClaudeAdapter implements Disposable {
   private wss?: WebSocketServer;
-  private port?: number;
+  private _port?: number;
   private authToken = "";
   private readonly clients = new Map<WebSocket, ClientMeta>();
-  private readonly subs: vscode.Disposable[] = [];
-  private statusBar?: vscode.StatusBarItem;
+  private readonly subs: Disposable[] = [];
+  private readonly clientListeners = new Set<() => void>();
   private reqSeq = 0;
   private readonly pendingReqs = new Map<string | number, (result: unknown) => void>();
+  private readonly log: Logger;
 
   constructor(
-    private readonly bridge: EditorBridge,
-    private readonly ctx: vscode.ExtensionContext,
-    private readonly log: vscode.LogOutputChannel
-  ) {}
+    private readonly frontend: EditorFrontend,
+    private readonly opts: ClaudeAdapterOptions
+  ) {
+    this.log = opts.log;
+  }
 
   async start(): Promise<void> {
     cleanupStaleLocks(); // drop locks left by dead servers so discovery is clean
     this.wss = await this.createServer();
-    this.port = (this.wss.address() as { port: number }).port;
+    this._port = (this.wss.address() as { port: number }).port;
 
     const { authToken } = writeLock(
-      this.port,
-      this.bridge.getWorkspaceFolders(),
-      vscode.env.appName
+      this._port,
+      this.frontend.getWorkspaceFolders(),
+      this.opts.ideName
     );
     this.authToken = authToken;
-
-    // Make code-server's own integrated terminals auto-connect, like the official
-    // extension does. External terminals use the shell wrapper instead.
-    this.ctx.environmentVariableCollection.replace(SSE_PORT_ENV, String(this.port));
 
     this.wss.on("connection", (ws, req) => this.onConnection(ws, req));
 
     // Editor context: selection goes only to sessions whose project folder
     // contains the file; diagnostics are broadcast (the CLI filters by path).
     this.subs.push(
-      this.bridge.onSelectionChanged((sel) => this.sendSelection(sel)),
-      this.bridge.onDiagnosticsChanged((files) =>
+      this.frontend.onSelectionChanged((sel) => this.sendSelection(sel)),
+      this.frontend.onDiagnosticsChanged((files) =>
         this.broadcast(NOTIFY.diagnosticsChanged, {
-          uris: files.map((f) => vscode.Uri.file(f).toString()),
+          uris: files.map((f) => pathToUri(f)),
         })
       )
     );
 
-    // Status bar item: live session count; click for the connection list.
-    this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-    this.statusBar.command = "agentIdeBridge.showStatus";
-    this.updateStatus();
-    this.statusBar.show();
-
-    this.log.info(`listening on 127.0.0.1:${this.port} (lock written)`);
+    this.log.info(`listening on 127.0.0.1:${this._port} (lock written)`);
   }
 
   /**
    * Bind the configured fixed port when free (so the CLAUDE_CODE_SSE_PORT the CLI
-   * holds stays valid across window reloads — no /ide dance), else a random one.
+   * holds stays valid across reconnects — no /ide dance), else a random one.
    */
   private async createServer(): Promise<WebSocketServer> {
-    const configured = vscode.workspace
-      .getConfiguration("agentIdeBridge")
-      .get<number>("port", 8991);
-    for (const port of [configured, 0]) {
+    for (const port of [this.opts.port, 0]) {
       try {
         const wss = new WebSocketServer({ host: "127.0.0.1", port });
         await new Promise<void>((resolve, reject) => {
@@ -106,38 +109,39 @@ export class ClaudeAdapter implements vscode.Disposable {
     throw new Error("failed to bind a port");
   }
 
-  private updateStatus(): void {
-    if (!this.statusBar) return;
-    const n = this.clients.size;
-    // Keep the hover cheap and static (a rebuilt MarkdownString flickered); the
-    // full list is shown on click.
-    this.statusBar.text = `$(plug) Agent Bridge: ${n}`;
-    this.statusBar.tooltip = `Agent IDE Bridge · ${n} session(s) · click for details`;
-    this.statusBar.backgroundColor =
-      n === 0 ? new vscode.ThemeColor("statusBarItem.warningBackground") : undefined;
+  // ---- status surface (rendered by the host: status bar / CLI banner) -------
+
+  get port(): number | undefined {
+    return this._port;
   }
 
-  /** Show the live connection list as a popup list — bound to the status bar click. */
-  showConnections(): void {
-    const qp = vscode.window.createQuickPick();
-    qp.title = `Agent IDE Bridge — 127.0.0.1:${this.port ?? "?"}`;
-    qp.placeholder = `${this.clients.size} session(s) connected`;
-    qp.items =
-      this.clients.size === 0
-        ? [{ label: "$(circle-slash) No sessions connected" }]
-        : [...this.clients.values()].map((m) => ({
-            label: `$(folder) ${m.folder ? basename(m.folder) : m.name || "(handshaking)"}`,
-            description: m.version ? `${m.name} v${m.version}` : m.name,
-            detail: `${m.folder ?? "(folder unknown)"} · since ${m.since.toLocaleTimeString()}`,
-          }));
-    qp.onDidAccept(() => qp.hide());
-    qp.onDidHide(() => qp.dispose());
-    qp.show();
+  get clientCount(): number {
+    return this.clients.size;
+  }
+
+  /** Snapshot of connected sessions, for a status list. */
+  getConnections(): ConnectionInfo[] {
+    return [...this.clients.values()].map((m) => ({
+      name: m.name,
+      version: m.version,
+      folder: m.folder,
+      since: m.since,
+    }));
+  }
+
+  /** Subscribe to connect/disconnect/identity changes. */
+  onClientsChanged(cb: () => void): Disposable {
+    this.clientListeners.add(cb);
+    return { dispose: () => this.clientListeners.delete(cb) };
+  }
+
+  private emitClientsChanged(): void {
+    for (const cb of this.clientListeners) cb();
   }
 
   status(): string {
-    return this.port
-      ? `Agent IDE Bridge: 127.0.0.1:${this.port}, ${this.clients.size} client(s)`
+    return this._port
+      ? `Agent IDE Bridge: 127.0.0.1:${this._port}, ${this.clients.size} client(s)`
       : "Agent IDE Bridge: not started";
   }
 
@@ -153,13 +157,13 @@ export class ClaudeAdapter implements vscode.Disposable {
     // multi-client: never evict a previous connection
     this.clients.set(ws, { name: "(handshaking)", version: "", since: new Date() });
     this.log.info(`client connected (${this.clients.size} total)`);
-    this.updateStatus();
+    this.emitClientsChanged();
 
     ws.on("message", (data) => void this.onMessage(ws, data));
     ws.on("close", () => {
       this.clients.delete(ws);
       this.log.info(`client disconnected (${this.clients.size} left)`);
-      this.updateStatus();
+      this.emitClientsChanged();
     });
     ws.on("error", (e) => this.log.warn(`ws error: ${String(e)}`));
   }
@@ -210,7 +214,7 @@ export class ClaudeAdapter implements vscode.Disposable {
     const info = (params?.clientInfo ?? {}) as { name?: string; version?: string };
     meta.name = str(info.name) || meta.name;
     meta.version = str(info.version);
-    this.updateStatus();
+    this.emitClientsChanged();
   }
 
   /** Ask the client for its workspace roots (its project folder) via MCP roots/list. */
@@ -227,7 +231,7 @@ export class ClaudeAdapter implements vscode.Disposable {
     const meta = this.clients.get(ws);
     if (meta && roots[0]?.uri) {
       meta.folder = uriToPath(roots[0].uri);
-      this.updateStatus();
+      this.emitClientsChanged();
     }
     this.pushSelection(ws); // now that the folder is known, show the active file if in-folder
   }
@@ -240,7 +244,7 @@ export class ClaudeAdapter implements vscode.Disposable {
 
   /** Push the current selection to one client, if it's inside that session's folder. */
   private pushSelection(ws: WebSocket): void {
-    const sel = this.bridge.getCurrentSelection();
+    const sel = this.frontend.getCurrentSelection();
     const meta = this.clients.get(ws);
     if (sel && meta && this.selectionAllowed(sel.filePath, meta)) {
       this.notify(ws, NOTIFY.selectionChanged, selectionParams(sel));
@@ -298,28 +302,28 @@ export class ClaudeAdapter implements vscode.Disposable {
         const filePath = str(args.old_file_path ?? args.new_file_path ?? args.filePath ?? args.path);
         const newContent = str(args.new_file_contents ?? args.content ?? args.newContent ?? "");
         const tabName = str(args.tab_name ?? args.tabName ?? `✻ [Claude Code] ${basename(filePath)}`);
-        const outcome = await this.bridge.openDiff({ filePath, newContent, tabName });
+        const outcome = await this.frontend.openDiff({ filePath, newContent, tabName });
         return outcome.status === "saved"
           ? textPair(DIFF_RESULT.saved, outcome.content)
           : textPair(DIFF_RESULT.rejected, tabName);
       }
       case TOOL.closeTab:
-        await this.bridge.closeTab(str(args.tab_name ?? args.tabName));
+        await this.frontend.closeTab(str(args.tab_name ?? args.tabName));
         return text(DIFF_RESULT.tabClosed);
       case TOOL.closeAllDiffTabs: {
-        const n = await this.bridge.closeAllDiffTabs();
+        const n = await this.frontend.closeAllDiffTabs();
         return text(`CLOSED_${n}_DIFF_TABS`);
       }
       case TOOL.getCurrentSelection:
       case TOOL.getLatestSelection: {
-        const sel = this.bridge.getCurrentSelection();
+        const sel = this.frontend.getCurrentSelection();
         return json(
           sel
             ? {
                 success: true,
                 text: sel.text,
                 filePath: sel.filePath,
-                fileUrl: sel.filePath ? vscode.Uri.file(sel.filePath).toString() : null,
+                fileUrl: sel.filePath ? pathToUri(sel.filePath) : null,
                 selection: { start: sel.start, end: sel.end, isEmpty: sel.isEmpty },
               }
             : { success: false, message: "No active editor found" }
@@ -327,20 +331,20 @@ export class ClaudeAdapter implements vscode.Disposable {
       }
       case TOOL.getOpenEditors:
         return json({
-          tabs: this.bridge.getOpenEditors().map((e) => ({
-            uri: vscode.Uri.file(e.filePath).toString(),
+          tabs: this.frontend.getOpenEditors().map((e) => ({
+            uri: pathToUri(e.filePath),
             filePath: e.filePath,
             isActive: e.isActive,
             isDirty: e.isDirty,
           })),
         });
       case TOOL.getWorkspaceFolders: {
-        const folders = this.bridge.getWorkspaceFolders();
+        const folders = this.frontend.getWorkspaceFolders();
         return json({
           success: true,
           folders: folders.map((p, index) => ({
             name: basename(p),
-            uri: vscode.Uri.file(p).toString(),
+            uri: pathToUri(p),
             path: p,
             index,
           })),
@@ -350,8 +354,8 @@ export class ClaudeAdapter implements vscode.Disposable {
       }
       case TOOL.getDiagnostics:
         return json(
-          this.bridge.getDiagnostics(args.uri ? uriToPath(str(args.uri)) : undefined).map((f) => ({
-            uri: vscode.Uri.file(f.filePath).toString(),
+          this.frontend.getDiagnostics(args.uri ? uriToPath(str(args.uri)) : undefined).map((f) => ({
+            uri: pathToUri(f.filePath),
             diagnostics: f.diagnostics.map((d) => ({
               message: d.message,
               severity: capitalize(d.severity),
@@ -363,14 +367,14 @@ export class ClaudeAdapter implements vscode.Disposable {
         );
       case TOOL.openFile: {
         const filePath = str(args.filePath ?? args.path);
-        await this.bridge.openFile(filePath);
+        await this.frontend.openFile(filePath);
         return text(`Opened file ${filePath}`);
       }
       case TOOL.saveDocument: {
         const filePath = str(args.filePath ?? args.path);
-        const st = this.bridge.documentState(filePath);
+        const st = this.frontend.documentState(filePath);
         if (!st.open) return json({ success: false, message: `Document not open: ${filePath}` });
-        const saved = await this.bridge.saveDocument(filePath);
+        const saved = await this.frontend.saveDocument(filePath);
         return json({
           success: true,
           filePath,
@@ -380,7 +384,7 @@ export class ClaudeAdapter implements vscode.Disposable {
       }
       case TOOL.checkDocumentDirty: {
         const filePath = str(args.filePath ?? args.path);
-        const st = this.bridge.documentState(filePath);
+        const st = this.frontend.documentState(filePath);
         return json(
           st.open
             ? { success: true, filePath, isDirty: st.dirty, isUntitled: st.untitled }
@@ -417,10 +421,9 @@ export class ClaudeAdapter implements vscode.Disposable {
       }
     }
     this.clients.clear();
-    this.statusBar?.dispose();
+    this.clientListeners.clear();
     this.wss?.close();
-    if (this.port !== undefined) removeLock(this.port);
-    this.ctx.environmentVariableCollection.delete(SSE_PORT_ENV);
+    if (this._port !== undefined) removeLock(this._port);
   }
 }
 
@@ -494,9 +497,13 @@ function basename(p: string): string {
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
+/** Absolute fs path → file:// URI (matches vscode.Uri.file(p).toString()). */
+function pathToUri(p: string): string {
+  return pathToFileURL(p).href;
+}
 /** Accept either a file:// URI or a plain path; return an fs path. */
 function uriToPath(s: string): string {
-  return s.startsWith("file:") ? vscode.Uri.parse(s).fsPath : s;
+  return s.startsWith("file:") ? fileURLToPath(s) : s;
 }
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -506,7 +513,7 @@ function selectionParams(sel: SelectionInfo): object {
   return {
     text: sel.text,
     filePath: sel.filePath,
-    fileUrl: sel.filePath ? vscode.Uri.file(sel.filePath).toString() : null,
+    fileUrl: sel.filePath ? pathToUri(sel.filePath) : null,
     selection: {
       start: sel.start,
       end: sel.end,

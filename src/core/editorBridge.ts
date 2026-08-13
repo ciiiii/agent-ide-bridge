@@ -3,6 +3,7 @@ import {
   DiagnosticItem,
   DiffOutcome,
   DiffRequest,
+  EditorFrontend,
   FileDiagnostics,
   OpenEditorInfo,
   SelectionInfo,
@@ -29,7 +30,7 @@ interface PendingDiff {
  * Multiple diffs can be open at once (one per session); each is keyed by a
  * unique right-hand URI so accept/reject resolves exactly the intended one.
  */
-export class EditorBridge implements vscode.Disposable {
+export class EditorBridge implements vscode.Disposable, EditorFrontend {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly pending = new Map<string, PendingDiff>(); // key: rightUri.toString()
   private readonly proposedContent = new Map<string, string>(); // key: diff id
