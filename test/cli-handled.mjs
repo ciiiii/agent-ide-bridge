@@ -49,11 +49,11 @@ const t = texts(await diffP);
 if (t[0] !== "DIFF_REJECTED") fail(`close_tab should return DIFF_REJECTED over the wire, got ${JSON.stringify(t)}`);
 await sleep(150);
 const clean = strip(out);
-if (!/handled in claude/.test(clean)) fail("viewer did not show 'handled in claude'");
-if (/✓ accepted/.test(clean) || /✗ rejected/.test(clean)) fail("viewer wrongly claimed a definite verdict");
+if (!/handled hello\.txt/.test(clean)) fail("viewer did not show '· handled'");
+if (/accepted/.test(clean) || /rejected/.test(clean)) fail("viewer wrongly claimed a definite verdict");
 if (!out.includes("\x1b[?1049l")) fail("pager did not leave the alternate screen");
 
-console.log("PASS: close_tab (claude-side) → 'handled in claude', no accepted/rejected guess");
+console.log("PASS: close_tab (claude-side) → '· handled', no accepted/rejected guess");
 conn.sock.close();
 child.kill();
 cleanup();

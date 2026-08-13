@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   Disposable,
   DiffOutcome,
@@ -24,11 +24,11 @@ export const ansi = {
 };
 
 /**
- * accept/reject come from the viewer's own y/n (a definite decision); "handled"
- * means the diff was resolved on the claude side (close_tab / cancel / disconnect),
- * where claude gives no reliable accept-vs-reject signal — so we don't guess.
+ * accept/reject come from the viewer's own y/n (a definite decision). "handled" =
+ * resolved on the claude side (close_tab / cancel), where claude gives no reliable
+ * accept-vs-reject signal, so we don't guess. "closed" = the agent disconnected.
  */
-type Verdict = "accept" | "reject" | "handled";
+type Verdict = "accept" | "reject" | "handled" | "closed";
 
 interface ActiveDiff {
   acceptContent: string;
@@ -173,10 +173,17 @@ export class TerminalDiffFrontend implements EditorFrontend {
   // a cancel, or the agent disconnecting — so we don't guess a verdict; we mark
   // it "handled in claude".
 
-  /** Cancel / disconnect from the claude side. */
+  /** Cancel from the claude side (the diff was resolved there). */
   async rejectActiveDiff(): Promise<boolean> {
     if (!this.active) return false;
     this.active.settle("handled");
+    return true;
+  }
+
+  /** The agent disconnected (claude quit / pane closed) — distinct from "handled". */
+  async disconnectActiveDiff(): Promise<boolean> {
+    if (!this.active) return false;
+    this.active.settle("closed");
     return true;
   }
 
@@ -271,8 +278,10 @@ class Pager {
         ? `${ansi.green}✓ accepted${ansi.reset}`
         : verdict === "reject"
         ? `${ansi.red}✗ rejected${ansi.reset}`
-        : `${ansi.dim}• handled in claude${ansi.reset}`;
-    process.stdout.write(`${label} ${ansi.dim}${this.view.subtitle}${ansi.reset}\n`);
+        : verdict === "handled"
+        ? `${ansi.dim}· handled${ansi.reset}`
+        : `${ansi.dim}· closed${ansi.reset}`;
+    process.stdout.write(`${label} ${ansi.dim}${basename(this.view.subtitle)}${ansi.reset}\n`);
     this.resolve(verdict);
   }
 

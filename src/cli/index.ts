@@ -103,7 +103,7 @@ async function main(): Promise<void> {
       return;
     }
     if (!everConnected) return;
-    void frontend.rejectActiveDiff(); // close any open diff — its agent is gone
+    void frontend.disconnectActiveDiff(); // close any open diff as "closed" — agent gone
     if (args.idleExit > 0 && !idleTimer) {
       idleTimer = setTimeout(() => {
         log.info("last client disconnected; exiting");
