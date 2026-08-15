@@ -76,10 +76,12 @@ That key opens the viewer beside your pane and launches `claude` there already
 connected — no `/ide`. (Manual alternative: invoke `…toggle` to open the viewer,
 then `/ide` in the claude pane and pick `claude-diff`.)
 
-- **Pager keys:** `j`/`k` line · `space`/`b` page · `g`/`G` ends · `y`/⏎ accept · `n`/esc reject.
+- **Pager keys:** `j`/`k` line · `space`/`b` page · `g`/`G` ends · `w` line/word diff ·
+  `y`/⏎ accept · `n`/esc reject.
 - **Auto:** a viewer auto-opens for a new worktree (`worktree.created`; `AIB_AUTO_OPEN=0`
   to disable) and auto-closes ~5s after claude exits (`AIB_IDLE_EXIT` seconds, `0` = never).
-- **Config:** `AIB_DIFF_PORT` (default: a stable per-workspace port), `AIB_DIFF_DIRECTION` (default `right`).
+- **Config:** `AIB_DIFF_PORT` (default: a stable per-workspace port), `AIB_DIFF_DIRECTION`
+  (default `right`), `AIB_DIFF_VIEW` (`line`|`word`, default `line`).
 - **Over `herdr --remote`:** keybindings resolve per `--remote-keybindings local|server` —
   put the binding on whichever side that selects.
 
@@ -104,7 +106,9 @@ cd ~/your/project
 CLAUDE_CODE_SSE_PORT=<port> claude        # tab 2  (or run claude, then /ide)
 ```
 
-Same pager keys as the [herdr setup](#herdr).
+Same pager keys as the [herdr setup](#herdr). `--diff-view word` (or `AIB_DIFF_VIEW=word`)
+opens diffs in git's word-diff instead of delta's line diff — easier to read when a change
+reflows a block across lines; `w` switches between them anytime.
 
 ---
 

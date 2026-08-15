@@ -20,10 +20,12 @@ if [ -z "$NODE" ]; then
 fi
 
 # The CLI exits itself ~AIB_IDLE_EXIT seconds after the agent disconnects (0 = never).
+# AIB_DIFF_VIEW picks the view diffs open in (line|word); `w` toggles it in the pager.
 "$NODE" "$HERDR_PLUGIN_ROOT/dist/cli.js" \
   --port "$(aib_ws_port)" \
   --ide-name claude-diff \
-  --idle-exit "${AIB_IDLE_EXIT:-5}"
+  --idle-exit "${AIB_IDLE_EXIT:-5}" \
+  --diff-view "${AIB_DIFF_VIEW:-line}"
 rc=$?
 
 # herdr may keep a pane open on process exit, so close our own pane to make

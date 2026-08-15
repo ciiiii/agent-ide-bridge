@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { ClaudeAdapter } from "../adapters/claude/server";
 import { Logger } from "../core/types";
-import { TerminalDiffFrontend, ansi } from "./terminalFrontend";
+import { DiffView, TerminalDiffFrontend, ansi } from "./terminalFrontend";
 
 interface Args {
   port: number;
@@ -9,6 +9,7 @@ interface Args {
   ideName: string;
   verbose: boolean;
   idleExit: number; // seconds after the last client disconnects before exiting; 0 = never
+  view: DiffView; // diff rendering the pager opens with; toggled live with `w`
 }
 
 function parseArgs(argv: string[]): Args {
@@ -18,6 +19,7 @@ function parseArgs(argv: string[]): Args {
     ideName: "terminal",
     verbose: false,
     idleExit: 0,
+    view: process.env.AIB_DIFF_VIEW === "word" ? "word" : "line",
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -25,6 +27,7 @@ function parseArgs(argv: string[]): Args {
     else if (arg === "--dir" || arg === "-C") a.dir = argv[++i];
     else if (arg === "--ide-name") a.ideName = argv[++i];
     else if (arg === "--idle-exit") a.idleExit = Number(argv[++i]);
+    else if (arg === "--diff-view") a.view = argv[++i] === "word" ? "word" : "line";
     else if (arg === "--verbose" || arg === "-v") a.verbose = true;
     else if (arg === "--help" || arg === "-h") {
       printHelp();
@@ -45,6 +48,8 @@ function printHelp(): void {
       `  -C, --dir <path>   workspace folder to advertise (default cwd)\n` +
       `      --ide-name <s>  IDE name in the lockfile (default "terminal")\n` +
       `      --idle-exit <s> exit N seconds after the last client disconnects (0 = never)\n` +
+      `      --diff-view <line|word>  initial diff rendering, toggled with w (default line;\n` +
+      `                        env AIB_DIFF_VIEW)\n` +
       `  -v, --verbose      log protocol traffic to stderr\n` +
       `  -h, --help          show this help\n`
   );
@@ -64,7 +69,7 @@ function makeLogger(verbose: boolean): Logger {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const log = makeLogger(args.verbose);
-  const frontend = new TerminalDiffFrontend({ cwd: args.dir, log });
+  const frontend = new TerminalDiffFrontend({ cwd: args.dir, log, view: args.view });
   const adapter = new ClaudeAdapter(frontend, {
     port: args.port,
     ideName: args.ideName,
