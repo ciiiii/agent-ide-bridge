@@ -23,6 +23,14 @@ pane="${HERDR_PANE_ID:-}"
 #    a busy pane the launch line would be typed into that process (a live claude
 #    prompt, a pager, an editor). There the key degrades to the viewer toggle — the
 #    session already running connects to it with /ide.
+#    The viewer pane itself is the sharpest case: it has no shell, so it *looks* idle
+#    (its foreground group is its own process group) and the launch line would land in
+#    the CLI. Check it before the idle test.
+if aib_is_viewer "$pane"; then
+  printf 'claude-diff: focused on the viewer — toggling it\n'
+  exec bash "$here/pane.sh" toggle
+fi
+
 running="$(aib_pane_running "$pane")"
 if [ -n "$running" ]; then
   printf 'claude-diff: pane is running %s — toggling the viewer only (connect it with /ide)\n' "$running"

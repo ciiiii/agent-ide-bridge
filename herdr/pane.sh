@@ -50,19 +50,10 @@ panes_json=$("$H" pane list --workspace "$ws" 2>/dev/null) &&
   printf '%s' "$panes_json" | jq -e '.result.panes' >/dev/null 2>&1 ||
   refuse "herdr pane list failed for $ws"
 
-# A viewer pane runs `node .../dist/cli.js` in its foreground process group.
-is_viewer() {
-  local info
-  info=$("$H" pane process-info --pane "$1" 2>/dev/null) || return 1
-  printf '%s' "$info" | jq -e '
-    [.result.process_info.foreground_processes[]
-      | select(((.argv // []) | map(select(test("/dist/cli\\.js$"))) | length) > 0)]
-    | length > 0' >/dev/null 2>&1
-}
-
+# A viewer pane runs `node .../dist/cli.js` in its foreground process group (aib_is_viewer).
 existing=""
 for p in $(printf '%s' "$panes_json" | jq -r '.result.panes[].pane_id // empty'); do
-  is_viewer "$p" && existing="$existing $p"
+  aib_is_viewer "$p" && existing="$existing $p"
 done
 
 close_all() {

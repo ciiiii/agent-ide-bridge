@@ -6,6 +6,18 @@ aib_fix_path() {
   export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 }
 
+# True if a pane is one of our viewer panes (it runs `node .../dist/cli.js`). Such a
+# pane is a plugin pane with no shell, so aib_pane_running reads it as idle — its
+# foreground group IS its "shell" — and nothing may ever be typed into it.
+aib_is_viewer() {
+  local info
+  info=$("${HERDR_BIN_PATH:-herdr}" pane process-info --pane "$1" 2>/dev/null) || return 1
+  printf '%s' "$info" | jq -e '
+    [.result.process_info.foreground_processes[]
+      | select(((.argv // []) | map(select(test("/dist/cli\\.js$"))) | length) > 0)]
+    | length > 0' >/dev/null 2>&1
+}
+
 # Name of the command running in a pane's foreground, or nothing when the pane sits
 # at its shell prompt. A pane is idle exactly when its foreground process group IS the
 # shell; the foreground_processes list alone is not a signal (an idle pane still shows
