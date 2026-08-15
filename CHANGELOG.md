@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/ciiiii/agent-ide-bridge/compare/v0.2.0...v0.3.0) (2026-08-15)
+
+
+### Features
+
+* **cli:** print a connect cue when a session attaches ([9eaf619](https://github.com/ciiiii/agent-ide-bridge/commit/9eaf619e7b0dac909649539b91fc6b080bfe2a21))
+* **cli:** wrap long diff lines and add a line/word diff view ([4656f57](https://github.com/ciiiii/agent-ide-bridge/commit/4656f578f6d84bf7eb1ac44dfd2ddce533169368))
+
+
+### Bug Fixes
+
+* **cli:** stop warning on stale-token rejects; add AIB_VERBOSE ([9071426](https://github.com/ciiiii/agent-ide-bridge/commit/907142624c76ffc4bf4d3345e97b2a8c5015c293))
+* **herdr:** pick start vs toggle from the pane's state ([9e8608e](https://github.com/ciiiii/agent-ide-bridge/commit/9e8608ee03f88bf104ae1409ab4266afdf4fde10))
+* **herdr:** treat a focused viewer pane as a toggle ([a97988e](https://github.com/ciiiii/agent-ide-bridge/commit/a97988e3c8d662379526deaadf1a53673b5cb133))
+
 ## [0.2.0](https://github.com/ciiiii/agent-ide-bridge/compare/v0.1.1...v0.2.0) (2026-08-13)
 
 
