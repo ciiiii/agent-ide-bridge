@@ -208,6 +208,11 @@ export class TerminalDiffFrontend implements EditorFrontend {
   // a cancel, or the agent disconnecting — so we don't guess a verdict; we mark
   // it "handled in claude".
 
+  /** True while a diff is on screen (the pager owns the terminal — don't write over it). */
+  hasActiveDiff(): boolean {
+    return this.active !== undefined;
+  }
+
   /** Cancel from the claude side (the diff was resolved there). */
   async rejectActiveDiff(): Promise<boolean> {
     if (!this.active) return false;

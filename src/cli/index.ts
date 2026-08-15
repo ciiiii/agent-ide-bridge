@@ -97,13 +97,24 @@ async function main(): Promise<void> {
   //  - if --idle-exit is set, exit after a grace period so herdr closes this pane.
   // The grace absorbs brief drops (e.g. a reconnect via /ide).
   let everConnected = false;
+  let clientCount = 0;
   let idleTimer: ReturnType<typeof setTimeout> | undefined;
   adapter.onClientsChanged(() => {
-    if (adapter.clientCount > 0) {
+    const gained = adapter.clientCount > clientCount;
+    clientCount = adapter.clientCount;
+    if (clientCount > 0) {
       everConnected = true;
       if (idleTimer) {
         clearTimeout(idleTimer);
         idleTimer = undefined;
+      }
+      // Counterpart to the disconnect cue, so the pane confirms /ide worked instead of
+      // just sitting on its banner. Skipped while a diff holds the alternate screen —
+      // a stray write there would smear the pager frame. (This fires on the socket, so
+      // the session's own name isn't known yet; the count is enough of a cue.)
+      if (gained && !frontend.hasActiveDiff()) {
+        const extra = clientCount > 1 ? ` ${ansi.dim}(${clientCount} sessions)${ansi.reset}` : "";
+        process.stdout.write(`${ansi.green}· claude connected${ansi.reset}${extra}\n`);
       }
       return;
     }

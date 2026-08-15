@@ -31,6 +31,8 @@ console.log(`port=${port}`);
 const conn = await connect({ port, authToken, wsDir });
 await handshake(conn, "cli-e2e");
 
+if (!/· claude connected/.test(strip(cliOut))) fail("no connect cue after the handshake");
+
 const wf = await conn.rpc("tools/call", { name: "getWorkspaceFolders", arguments: {} });
 if (!JSON.parse(wf.result.content[0].text).folders.some((f) => f.path === wsDir))
   fail("getWorkspaceFolders did not include --dir");
