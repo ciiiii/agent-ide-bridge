@@ -18,6 +18,17 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 pane="${HERDR_PANE_ID:-}"
 [ -n "$pane" ] || die "run this from inside a shell pane (no HERDR_PANE_ID)"
 
+# 0) Pick the action from the pane's state. Launching claude only makes sense on an
+#    idle pane: `herdr pane run` writes to the pane regardless of what holds it, so on
+#    a busy pane the launch line would be typed into that process (a live claude
+#    prompt, a pager, an editor). There the key degrades to the viewer toggle — the
+#    session already running connects to it with /ide.
+running="$(aib_pane_running "$pane")"
+if [ -n "$running" ]; then
+  printf 'claude-diff: pane is running %s — toggling the viewer only (connect it with /ide)\n' "$running"
+  exec bash "$here/pane.sh" toggle
+fi
+
 # 1) Open the viewer beside this pane (idempotent — no-op if already open).
 bash "$here/pane.sh" open || true
 

@@ -72,9 +72,17 @@ command = "cai.agent-ide-bridge.start"
 description = "start claude + diff viewer"
 ```
 
-That key opens the viewer beside your pane and launches `claude` there already
-connected — no `/ide`. (Manual alternative: invoke `…toggle` to open the viewer,
-then `/ide` in the claude pane and pick `claude-diff`.)
+`start` picks its action from the pane it runs in:
+
+- **idle pane** → opens the viewer beside it and launches `claude` there already
+  connected — no `/ide`.
+- **busy pane** (claude already running, an editor, a build) → toggles the viewer
+  only, and you connect the running session with `/ide`. It can't launch claude
+  there: `herdr pane run` writes to the pane whatever holds it, so the launch line
+  would be typed into that process.
+
+So one key covers everything; `cai.agent-ide-bridge.{toggle,open,close}` stay available
+as actions if you'd rather put the viewer on its own key.
 
 - **Pager keys:** `j`/`k` line · `space`/`b` page · `g`/`G` ends · `w` line/word diff ·
   `y`/⏎ accept · `n`/esc reject.
