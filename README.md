@@ -89,7 +89,8 @@ as actions if you'd rather put the viewer on its own key.
 - **Auto:** a viewer auto-opens for a new worktree (`worktree.created`; `AIB_AUTO_OPEN=0`
   to disable) and auto-closes ~5s after claude exits (`AIB_IDLE_EXIT` seconds, `0` = never).
 - **Config:** `AIB_DIFF_PORT` (default: a stable per-workspace port), `AIB_DIFF_DIRECTION`
-  (default `right`), `AIB_DIFF_VIEW` (`line`|`word`, default `line`).
+  (default `right`), `AIB_DIFF_VIEW` (`line`|`word`, default `line`), `AIB_VERBOSE=1`
+  (protocol/connection logging; quiet by default — same as `claude-diff -v`).
 - **Over `herdr --remote`:** keybindings resolve per `--remote-keybindings local|server` —
   put the binding on whichever side that selects.
 

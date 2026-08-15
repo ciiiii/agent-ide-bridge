@@ -17,7 +17,7 @@ function parseArgs(argv: string[]): Args {
     port: 8991,
     dir: process.cwd(),
     ideName: "terminal",
-    verbose: false,
+    verbose: process.env.AIB_VERBOSE === "1",
     idleExit: 0,
     view: process.env.AIB_DIFF_VIEW === "word" ? "word" : "line",
   };
@@ -50,7 +50,7 @@ function printHelp(): void {
       `      --idle-exit <s> exit N seconds after the last client disconnects (0 = never)\n` +
       `      --diff-view <line|word>  initial diff rendering, toggled with w (default line;\n` +
       `                        env AIB_DIFF_VIEW)\n` +
-      `  -v, --verbose      log protocol traffic to stderr\n` +
+      `  -v, --verbose      log protocol traffic to stderr (env AIB_VERBOSE=1)\n` +
       `  -h, --help          show this help\n`
   );
 }

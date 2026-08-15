@@ -145,7 +145,11 @@ export class ClaudeAdapter implements Disposable {
   private onConnection(ws: WebSocket, req: IncomingMessage): void {
     const token = req.headers[AUTH_HEADER];
     if (token !== this.authToken) {
-      this.log.warn("rejected unauthorized WS connection");
+      // Routine after a viewer restart: the port is deterministic but the token is
+      // minted per process, so a session that connected to the previous one retries
+      // with a stale token until it re-runs /ide. Not warn-worthy noise in the pane —
+      // still visible under --verbose for the case where it isn't a stale token.
+      this.log.info("rejected a WS connection with a stale/invalid token");
       ws.close(1008, "Unauthorized");
       return;
     }
