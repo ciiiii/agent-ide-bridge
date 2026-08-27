@@ -68,7 +68,7 @@ herdr plugin install ciiiii/agent-ide-bridge --ref v0.2.0  # pin a version
 [[keys.command]]
 key = "prefix+d"                        # ctrl+b then d
 type = "plugin_action"
-command = "cai.agent-ide-bridge.start"
+command = "go2sheep.agent-ide-bridge.start"
 description = "start claude + diff viewer"
 ```
 
@@ -81,7 +81,7 @@ description = "start claude + diff viewer"
   there: `herdr pane run` writes to the pane whatever holds it, so the launch line
   would be typed into that process.
 
-So one key covers everything; `cai.agent-ide-bridge.{toggle,open,close}` stay available
+So one key covers everything; `go2sheep.agent-ide-bridge.{toggle,open,close}` stay available
 as actions if you'd rather put the viewer on its own key.
 
 - **Pager keys:** `j`/`k` line · `space`/`b` page · `g`/`G` ends · `w` line/word diff ·

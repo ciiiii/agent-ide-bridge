@@ -1,4 +1,4 @@
-id = "cai.agent-ide-bridge"
+id = "go2sheep.agent-ide-bridge"
 name = "agent-ide-bridge"
 version = "0.2.0" # x-release-please-version
 min_herdr_version = "0.7.5"

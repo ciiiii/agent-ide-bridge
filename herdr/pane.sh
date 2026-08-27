@@ -18,7 +18,7 @@ aib_fix_path
 
 mode="${1:-toggle}"
 H="${HERDR_BIN_PATH:-herdr}"
-PLUGIN="${HERDR_PLUGIN_ID:-cai.agent-ide-bridge}"
+PLUGIN="${HERDR_PLUGIN_ID:-go2sheep.agent-ide-bridge}"
 DIRECTION="${AIB_DIFF_DIRECTION:-right}" # split side for the viewer
 
 # Events must never fail loudly (herdr logs them); explicit actions should.
