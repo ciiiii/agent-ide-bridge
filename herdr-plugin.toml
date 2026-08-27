@@ -1,6 +1,6 @@
 id = "go2sheep.agent-ide-bridge"
 name = "agent-ide-bridge"
-version = "0.2.0" # x-release-please-version
+version = "0.3.0" # x-release-please-version
 min_herdr_version = "0.7.5"
 platforms = ["macos", "linux"]
 description = "Show Claude's proposed diffs (accept/reject) in a herdr pane beside the agent."
